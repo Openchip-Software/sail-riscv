@@ -151,6 +151,74 @@ add_first_party_experimental_test("test_zilx.S")
 
 add_first_party_test_with_config("test_tval_truncate_invalid_physaddr.S" "rv64gcvh_zfbfmin" 64 "tval_truncate_invalid_physaddr.json")
 
+# IME tile and matrix tests.
+set(ime_tests)
+macro(add_ime_test name march xlen override_json_file)
+    list(APPEND ime_tests "${name}" "${march}" "${xlen}" "${override_json_file}")
+endmacro()
+
+add_ime_test("test_ime_tile_ls.S" "rv64gcv_zvvmtls" 64 "ime_override.json")
+add_ime_test("test_ime_transpose_tile_ls.S" "rv64gcv_zvvmtls_zvvmttls" 64 "ime_override.json")
+add_ime_test("test_ime_vmmacc.S" "rv64gcv_zvvmm_zvvmtls" 64 "ime_override.json")
+add_ime_test("test_ime_vwmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
+add_ime_test("test_ime_vqmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
+add_ime_test("test_ime_v8wmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
+add_ime_test("test_ime_vfmmacc.S" "rv64gcv" 64 "ime_override.json")
+
+list(LENGTH ime_tests ime_tests_len)
+math(EXPR ime_test_last "${ime_tests_len} - 1")
+foreach(idx RANGE 0 ${ime_test_last} 4)
+    list(SUBLIST ime_tests ${idx} 4 entry)
+    list(GET entry 0 test_source)
+    list(GET entry 1 march)
+    list(GET entry 2 xlen)
+    list(GET entry 3 override_config)
+
+    set(arch "rv${xlen}d")
+    if (xlen EQUAL 32)
+        set(mabi "ilp32")
+    else()
+        set(mabi "lp64")
+    endif()
+    set(config "${CMAKE_BINARY_DIR}/config/${arch}_v256_e${xlen}.json")
+    set(override_config "${CMAKE_CURRENT_SOURCE_DIR}/src/${override_config}")
+
+    set(elf "${CMAKE_BINARY_DIR}/${arch}_${test_source}.elf")
+
+    add_custom_command(
+        OUTPUT ${elf}
+        DEPENDS ${common_deps} "src/${test_source}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMAND ${CROSS_COMPILER_COMMAND_RV${xlen}}
+            -march=${march}
+            -mabi=${mabi}d
+            -mno-relax
+            -ffreestanding
+            -nostdlib
+            -static
+            -mcmodel=medany
+            -g
+            -Og
+            -Wall
+            -Werror
+            -T "${CMAKE_CURRENT_SOURCE_DIR}/src/common/link.ld"
+            -o ${elf}
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/${test_source}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/common/crt0.S"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/common/nanoprintf.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime.c"
+        VERBATIM
+        COMMENT "Compiling ${test_source}"
+    )
+
+    add_custom_target(build_${arch}_${test_source} ALL DEPENDS ${elf} ${config} ${override_config})
+
+    add_test(
+        NAME "first_party_${arch}_${test_source}"
+        COMMAND $<TARGET_FILE:sail_riscv_sim> --enable-experimental-extensions --config ${config} --config-override ${override_config} ${elf}
+    )
+endforeach()
+
 list(LENGTH tests tests_len)
 math(EXPR test_last "${tests_len} - 1")
 foreach(idx RANGE 0 ${test_last} 4)

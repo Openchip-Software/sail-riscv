@@ -972,6 +972,18 @@
     "Zvfhmin": {
       "supported": true
     },
+    "Zvvmm": {
+      "supported": false
+    },
+    "Zvvmtls": {
+      "supported": false
+    },
+    "Zvvmttls": {
+      "supported": false
+    },
+    "Zvvfmm": {
+      "supported": false
+    },
     "Zvbb": {
       "supported": true
     },

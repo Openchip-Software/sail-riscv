@@ -412,6 +412,20 @@ enum clause extension = Ext_Zvfhmin
 mapping clause extensionName = Ext_Zvfhmin <-> "zvfhmin"
 function clause hartSupports(Ext_Zvfhmin) = config extensions.Zvfhmin.supported
 
+// Integrated Matrix Extension (draft Zvvm family)
+enum clause extension = Ext_Zvvmm
+mapping clause extensionName = Ext_Zvvmm <-> "zvvmm"
+function clause hartSupports(Ext_Zvvmm) = sys_enable_experimental_extensions() & config extensions.Zvvmm.supported
+enum clause extension = Ext_Zvvmtls
+mapping clause extensionName = Ext_Zvvmtls <-> "zvvmtls"
+function clause hartSupports(Ext_Zvvmtls) = sys_enable_experimental_extensions() & config extensions.Zvvmtls.supported
+enum clause extension = Ext_Zvvmttls
+mapping clause extensionName = Ext_Zvvmttls <-> "zvvmttls"
+function clause hartSupports(Ext_Zvvmttls) = sys_enable_experimental_extensions() & config extensions.Zvvmttls.supported
+enum clause extension = Ext_Zvvfmm
+mapping clause extensionName = Ext_Zvvfmm <-> "zvvfmm"
+function clause hartSupports(Ext_Zvvfmm) = sys_enable_experimental_extensions() & config extensions.Zvvfmm.supported
+
 // Vector Basic Bit-manipulation
 enum clause extension = Ext_Zvbb
 mapping clause extensionName = Ext_Zvbb <-> "zvbb"
@@ -875,6 +889,12 @@ let extensions_ordered_for_isa_string = [
   // Zvfh
   Ext_Zvfh,
   Ext_Zvfhmin,
+
+  // Zvvm
+  Ext_Zvvfmm,
+  Ext_Zvvmm,
+  Ext_Zvvmtls,
+  Ext_Zvvmttls,
 
   // Zvk
   Ext_Zvkb,

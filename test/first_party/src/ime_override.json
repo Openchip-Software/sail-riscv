@@ -1,0 +1,16 @@
+{
+  "extensions": {
+    "Zvvmm": {
+      "supported": true
+    },
+    "Zvvmtls": {
+      "supported": true
+    },
+    "Zvvmttls": {
+      "supported": true
+    },
+    "Zvvfmm": {
+      "supported": true
+    }
+  }
+}
