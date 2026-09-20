@@ -92,8 +92,9 @@ function ime_group_size_legal(group : nat) -> bool =
   group == 1 | group == 2 | group == 4 | group == 8
 
 // Map a sequential tile element index to the flat architectural element
-// index within a vector register group. This follows the Sail starting point
-// in the IME specification: tile_reg_idx(i, LMUL, lambda, elems_per_reg).
+// index within a vector register group. The index and elems_per_reg use the
+// element width of the vector-register view being indexed. Widening A/B
+// callers therefore pass lambda * W and the narrow input epr.
 function ime_tile_reg_idx(i : nat, group : nat, lambda_value : nat, elems_per_reg : nat) -> nat = {
   let linesize : nat = lambda_value * group;
   assert(linesize > 0);

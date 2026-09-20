@@ -210,7 +210,6 @@ function execute_ime_int_gemm(
   let EMUL_C_pow = ime_group_size_to_pow(EMUL_C);
   // Logical input element width; W such elements pack into one SEW storage slot.
   let EEW : nat = EEW_C / W;
-
   if W != 1 & W != 2 & W != 4 & W != 8 then return Illegal_Instruction();
   if EEW_C % W != 0 then return Illegal_Instruction();
   if not(ime_int_eew_supported(EEW)) then return Illegal_Instruction();
@@ -452,6 +451,8 @@ function execute_ime_fp_gemm(
   let EMUL_C_pow = ime_group_size_to_pow(EMUL_C);
 
   let EEW : nat = EEW_C / W;
+  assert(EEW > 0);
+  let epr_A : nat = vlen / EEW;
 
   if W != 1 & W != 2 & W != 4 then return Illegal_Instruction();
   if EEW_C % W != 0 then return Illegal_Instruction();
@@ -473,8 +474,8 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(16) = read_single_element(16, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let a_flat = ime_mat_A_idx(i, k, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(k, j, storage_K, LMUL, lambda_value, epr_C);
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
             let prod = fp_mul(rm_3b, read_single_element(16, a_flat, vs1), read_single_element(16, b_flat, vs2));
             acc = fp_add(rm_3b, acc, prod)
           };
@@ -488,8 +489,8 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(32) = read_single_element(32, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let a_flat = ime_mat_A_idx(i, k, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(k, j, storage_K, LMUL, lambda_value, epr_C);
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
             let prod = fp_mul(rm_3b, read_single_element(32, a_flat, vs1), read_single_element(32, b_flat, vs2));
             acc = fp_add(rm_3b, acc, prod)
           };
@@ -503,8 +504,8 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(64) = read_single_element(64, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let a_flat = ime_mat_A_idx(i, k, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(k, j, storage_K, LMUL, lambda_value, epr_C);
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
             let prod = fp_mul(rm_3b, read_single_element(64, a_flat, vs1), read_single_element(64, b_flat, vs2));
             acc = fp_add(rm_3b, acc, prod)
           };
@@ -518,12 +519,10 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(32) = read_single_element(32, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let storage_col = ime_packed_storage_col(k, W);
-            let lane = ime_packed_lane(k, W);
-            let a_flat = ime_mat_A_idx(i, storage_col, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(storage_col, j, storage_K, LMUL, lambda_value, epr_C);
-            let a = ime_fp16_or_bf16_to_fp32(rm_3b, altfmt_A, ime_lane16_from32(read_single_element(32, a_flat, vs1), lane));
-            let b = ime_fp16_or_bf16_to_fp32(rm_3b, altfmt_B, ime_lane16_from32(read_single_element(32, b_flat, vs2), lane));
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
+            let a = ime_fp16_or_bf16_to_fp32(rm_3b, altfmt_A, read_single_element(16, a_flat, vs1));
+            let b = ime_fp16_or_bf16_to_fp32(rm_3b, altfmt_B, read_single_element(16, b_flat, vs2));
             let prod = fp_mul(rm_3b, a, b);
             acc = fp_add(rm_3b, acc, prod)
           };
@@ -537,12 +536,10 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(64) = read_single_element(64, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let storage_col = ime_packed_storage_col(k, W);
-            let lane = ime_packed_lane(k, W);
-            let a_flat = ime_mat_A_idx(i, storage_col, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(storage_col, j, storage_K, LMUL, lambda_value, epr_C);
-            let a = ime_fp32_to_fp64_set_flags(rm_3b, ime_lane32_from64(read_single_element(64, a_flat, vs1), lane));
-            let b = ime_fp32_to_fp64_set_flags(rm_3b, ime_lane32_from64(read_single_element(64, b_flat, vs2), lane));
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
+            let a = ime_fp32_to_fp64_set_flags(rm_3b, read_single_element(32, a_flat, vs1));
+            let b = ime_fp32_to_fp64_set_flags(rm_3b, read_single_element(32, b_flat, vs2));
             let prod = fp_mul(rm_3b, a, b);
             acc = fp_add(rm_3b, acc, prod)
           };
@@ -556,12 +553,10 @@ function execute_ime_fp_gemm(
           let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
           var acc : bits(64) = read_single_element(64, c_flat, vd);
           foreach (k from 0 to (K_eff - 1)) {
-            let storage_col = ime_packed_storage_col(k, W);
-            let lane = ime_packed_lane(k, W);
-            let a_flat = ime_mat_A_idx(i, storage_col, storage_K, LMUL, lambda_value, epr_C);
-            let b_flat = ime_mat_B_idx(storage_col, j, storage_K, LMUL, lambda_value, epr_C);
-            let a = ime_fp16_or_bf16_to_fp64(rm_3b, altfmt_A, ime_lane16_from64(read_single_element(64, a_flat, vs1), lane));
-            let b = ime_fp16_or_bf16_to_fp64(rm_3b, altfmt_B, ime_lane16_from64(read_single_element(64, b_flat, vs2), lane));
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
+            let a = ime_fp16_or_bf16_to_fp64(rm_3b, altfmt_A, read_single_element(16, a_flat, vs1));
+            let b = ime_fp16_or_bf16_to_fp64(rm_3b, altfmt_B, read_single_element(16, b_flat, vs2));
             let prod = fp_mul(rm_3b, a, b);
             acc = fp_add(rm_3b, acc, prod)
           };
