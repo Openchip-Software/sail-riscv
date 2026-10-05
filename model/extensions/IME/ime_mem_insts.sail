@@ -4,14 +4,17 @@
 // =======================================================================================
 
 // vmtl.v — order-preserving tile load
-union clause instruction = VMTLTYPE : (bits(3), bits(1), ime_tile_mode, bits(1), regidx, regidx, vregidx)
+union clause instruction = VMTLTYPE : (bits(3), ime_tile_mode, bits(1), regidx, regidx, vregidx)
 
-mapping clause encdec = VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd)
-  <-> lambda_field @ L @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vd) @ 0b0000111
+// Bit 28 is fixed to 1. It is the mew bit of the base V load/store encoding,
+// where mew=1 is reserved, so tile loads do not overlap vle*/vlse*/vlxei*.
+// A lambda immediate of 000 selects vtype.lambda.
+mapping clause encdec = VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd)
+  <-> lambda_field @ 0b1 @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vd) @ 0b0000111
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
 
-function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
+function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
   let transposed : bool = mode == IME_TILE_TRANSPOSED;
 
@@ -20,7 +23,8 @@ function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
   let LMUL_pow = get_lmul_pow();
   let EMUL_pow = LMUL_pow;
   let num_elem = get_num_elem(EMUL_pow, SEW);
-  let lambda_value = if L == 0b1 then ime_lambda_field_to_value(lambda_field) else ime_lambda_field_to_value(vtype[vlambda]);
+  let effective_lambda_field = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
+  let lambda_value = ime_lambda_field_to_value(effective_lambda_field);
 
   if not(valid_vtype()) |
      not(valid_reg_group(vd, EMUL_pow)) |
@@ -29,7 +33,7 @@ function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
   then return Illegal_Instruction();
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = if L == 0b1 then ime_lambda_field_to_nat(lambda_field) else ime_lambda_field_to_nat(vtype[vlambda]);
+  let lambda_nat = ime_lambda_field_to_nat(effective_lambda_field);
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
@@ -85,14 +89,16 @@ function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
 }
 
 // vmts.v — order-preserving tile store
-union clause instruction = VMTSTYPE : (bits(3), bits(1), ime_tile_mode, bits(1), regidx, regidx, vregidx)
+union clause instruction = VMTSTYPE : (bits(3), ime_tile_mode, bits(1), regidx, regidx, vregidx)
 
-mapping clause encdec = VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3)
-  <-> lambda_field @ L @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vs3) @ 0b0100111
+// Bit 28 is fixed to 1 (mew=1, reserved in the base V store encoding).
+// A lambda immediate of 000 selects vtype.lambda.
+mapping clause encdec = VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3)
+  <-> lambda_field @ 0b1 @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vs3) @ 0b0100111
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
 
-function clause execute VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3) = {
+function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
   let transposed : bool = mode == IME_TILE_TRANSPOSED;
 
@@ -101,7 +107,8 @@ function clause execute VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3) = {
   let LMUL_pow = get_lmul_pow();
   let EMUL_pow = LMUL_pow;
   let num_elem = get_num_elem(EMUL_pow, SEW);
-  let lambda_value = if L == 0b1 then ime_lambda_field_to_value(lambda_field) else ime_lambda_field_to_value(vtype[vlambda]);
+  let effective_lambda_field = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
+  let lambda_value = ime_lambda_field_to_value(effective_lambda_field);
 
   if not(valid_vtype()) |
      not(valid_reg_group(vs3, EMUL_pow)) |
@@ -110,7 +117,7 @@ function clause execute VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3) = {
   then return Illegal_Instruction();
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = if L == 0b1 then ime_lambda_field_to_nat(lambda_field) else ime_lambda_field_to_nat(vtype[vlambda]);
+  let lambda_nat = ime_lambda_field_to_nat(effective_lambda_field);
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
