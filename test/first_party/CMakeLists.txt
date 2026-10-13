@@ -159,6 +159,7 @@ endmacro()
 
 add_ime_test("test_ime_tile_ls.S" "rv64gcv_zvvmtls" 64 "ime_override.json")
 add_ime_test("test_ime_transpose_tile_ls.S" "rv64gcv_zvvmtls_zvvmttls" 64 "ime_override.json")
+add_ime_test("test_ime_vle64_coexist.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_vmmacc.S" "rv64gcv_zvvmm_zvvmtls" 64 "ime_override.json")
 add_ime_test("test_ime_vwmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
 add_ime_test("test_ime_vqmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
