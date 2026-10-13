@@ -625,6 +625,7 @@ unit_tests {
   files
     unit_tests/test_mstatus.sail,
     unit_tests/test_ime_vtype.sail,
+    unit_tests/test_ime_tile_ls_asm.sail,
 }
 
 main {

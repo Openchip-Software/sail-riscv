@@ -11,6 +11,12 @@ mapping clause encdec = VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd)
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
 
+mapping clause assembly = VMTLTYPE(lambda_field, IME_TILE_ORDERED, vm, rs2, rs1, vd)
+  <-> "vmtl.v" ^ spc() ^ vreg_name(vd) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+mapping clause assembly = VMTLTYPE(lambda_field, IME_TILE_TRANSPOSED, vm, rs2, rs1, vd)
+  <-> "vmttl.v" ^ spc() ^ vreg_name(vd) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
 function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
   let transposed : bool = mode == IME_TILE_TRANSPOSED;
@@ -95,6 +101,12 @@ mapping clause encdec = VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3)
   <-> lambda_field @ 0b1 @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vs3) @ 0b0100111
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
+
+mapping clause assembly = VMTSTYPE(lambda_field, IME_TILE_ORDERED, vm, rs2, rs1, vs3)
+  <-> "vmts.v" ^ spc() ^ vreg_name(vs3) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+mapping clause assembly = VMTSTYPE(lambda_field, IME_TILE_TRANSPOSED, vm, rs2, rs1, vs3)
+  <-> "vmtts.v" ^ spc() ^ vreg_name(vs3) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
 
 function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
