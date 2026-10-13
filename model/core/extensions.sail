@@ -890,12 +890,6 @@ let extensions_ordered_for_isa_string = [
   Ext_Zvfh,
   Ext_Zvfhmin,
 
-  // Zvvm
-  Ext_Zvvfmm,
-  Ext_Zvvmm,
-  Ext_Zvvmtls,
-  Ext_Zvvmttls,
-
   // Zvk
   Ext_Zvkb,
   Ext_Zvkg,
@@ -919,6 +913,12 @@ let extensions_ordered_for_isa_string = [
   Ext_Zvl256b,
   Ext_Zvl512b,
   Ext_Zvl1024b,
+
+  // Zvvm
+  Ext_Zvvfmm,
+  Ext_Zvvmm,
+  Ext_Zvvmtls,
+  Ext_Zvvmttls,
 
   // Supervisor extensions, ordered alphabetically.
   Ext_Ssccptr,
