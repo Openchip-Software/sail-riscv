@@ -37,3 +37,10 @@ mapping maybe_ime_lambda : string <-> bits(3) = {
   sep() ^ "L32"  <-> 0b110,
   sep() ^ "L64"  <-> 0b111,
 }
+
+// Optional microscaling operand of the widening FP matrix multiply assembly
+// syntax. vm=0 selects MX-scaled operands with scales in v0.
+mapping maybe_ime_vscale : string <-> bits(1) = {
+  ""                 <-> 0b1,
+  sep() ^ "v0.scale" <-> 0b0,
+}
