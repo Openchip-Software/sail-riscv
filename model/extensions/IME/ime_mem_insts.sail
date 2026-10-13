@@ -33,6 +33,7 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   if not(valid_vtype()) |
+     illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vd, EMUL_pow)) |
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0
@@ -124,6 +125,7 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   if not(valid_vtype()) |
+     illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vs3, EMUL_pow)) |
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0
