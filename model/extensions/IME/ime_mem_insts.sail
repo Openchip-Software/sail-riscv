@@ -4,14 +4,20 @@
 // =======================================================================================
 
 // vmtl.v — order-preserving tile load
-union clause instruction = VMTLTYPE : (bits(3), bits(1), ime_tile_mode, bits(1), regidx, regidx, vregidx)
+union clause instruction = VMTLTYPE : (bits(3), ime_tile_mode, bits(1), regidx, regidx, vregidx)
 
-mapping clause encdec = VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd)
-  <-> lambda_field @ L @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vd) @ 0b0000111
+mapping clause encdec = VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd)
+  <-> lambda_field @ 0b1 @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vd) @ 0b0000111
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
 
-function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
+mapping clause assembly = VMTLTYPE(lambda_field, IME_TILE_ORDERED, vm, rs2, rs1, vd)
+  <-> "vmtl.v" ^ spc() ^ vreg_name(vd) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+mapping clause assembly = VMTLTYPE(lambda_field, IME_TILE_TRANSPOSED, vm, rs2, rs1, vd)
+  <-> "vmttl.v" ^ spc() ^ vreg_name(vd) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
   let transposed : bool = mode == IME_TILE_TRANSPOSED;
 
@@ -20,16 +26,21 @@ function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
   let LMUL_pow = get_lmul_pow();
   let EMUL_pow = LMUL_pow;
   let num_elem = get_num_elem(EMUL_pow, SEW);
-  let lambda_value = if L == 0b1 then ime_lambda_field_to_value(lambda_field) else ime_lambda_field_to_value(vtype[vlambda]);
+  // A nonzero instruction lambda field overrides vtype.lambda; 000 selects
+  // vtype.lambda. Inst bit 28 (mew) is always 1 for tile load/store, which
+  // keeps these encodings clear of the standard 64-bit vector loads/stores.
+  let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
+  let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   if not(valid_vtype()) |
+     illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vd, EMUL_pow)) |
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0
   then return Illegal_Instruction();
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = if L == 0b1 then ime_lambda_field_to_nat(lambda_field) else ime_lambda_field_to_nat(vtype[vlambda]);
+  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
@@ -85,14 +96,20 @@ function clause execute VMTLTYPE(lambda_field, L, mode, vm, rs2, rs1, vd) = {
 }
 
 // vmts.v — order-preserving tile store
-union clause instruction = VMTSTYPE : (bits(3), bits(1), ime_tile_mode, bits(1), regidx, regidx, vregidx)
+union clause instruction = VMTSTYPE : (bits(3), ime_tile_mode, bits(1), regidx, regidx, vregidx)
 
-mapping clause encdec = VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3)
-  <-> lambda_field @ L @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vs3) @ 0b0100111
+mapping clause encdec = VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3)
+  <-> lambda_field @ 0b1 @ encdec_ime_tile_mode(mode) @ vm @ encdec_reg(rs2) @ encdec_reg(rs1) @ 0b111 @ encdec_vreg(vs3) @ 0b0100111
   when (mode == IME_TILE_ORDERED & currentlyEnabled(Ext_Zvvmtls)) |
        (mode == IME_TILE_TRANSPOSED & currentlyEnabled(Ext_Zvvmttls))
 
-function clause execute VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3) = {
+mapping clause assembly = VMTSTYPE(lambda_field, IME_TILE_ORDERED, vm, rs2, rs1, vs3)
+  <-> "vmts.v" ^ spc() ^ vreg_name(vs3) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+mapping clause assembly = VMTSTYPE(lambda_field, IME_TILE_TRANSPOSED, vm, rs2, rs1, vs3)
+  <-> "vmtts.v" ^ spc() ^ vreg_name(vs3) ^ sep() ^ "(" ^ reg_name(rs1) ^ ")" ^ sep() ^ reg_name(rs2) ^ maybe_ime_lambda(lambda_field) ^ maybe_vmask(vm)
+
+function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   if mode != IME_TILE_ORDERED & mode != IME_TILE_TRANSPOSED then return Illegal_Instruction();
   let transposed : bool = mode == IME_TILE_TRANSPOSED;
 
@@ -101,16 +118,21 @@ function clause execute VMTSTYPE(lambda_field, L, mode, vm, rs2, rs1, vs3) = {
   let LMUL_pow = get_lmul_pow();
   let EMUL_pow = LMUL_pow;
   let num_elem = get_num_elem(EMUL_pow, SEW);
-  let lambda_value = if L == 0b1 then ime_lambda_field_to_value(lambda_field) else ime_lambda_field_to_value(vtype[vlambda]);
+  // A nonzero instruction lambda field overrides vtype.lambda; 000 selects
+  // vtype.lambda. Inst bit 28 (mew) is always 1 for tile load/store, which
+  // keeps these encodings clear of the standard 64-bit vector loads/stores.
+  let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
+  let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   if not(valid_vtype()) |
+     illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vs3, EMUL_pow)) |
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0
   then return Illegal_Instruction();
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = if L == 0b1 then ime_lambda_field_to_nat(lambda_field) else ime_lambda_field_to_nat(vtype[vlambda]);
+  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
@@ -287,8 +309,8 @@ mapping clause encdec = IMEVMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111000 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvmm)
 
-mapping clause assembly = IMEVMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+mapping clause assembly = IMEVMMACCTYPE(0b1, vs2, vs1, vd)
+  <-> "vmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
 
 function clause execute IMEVMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(1, vm, vs2, vs1, vd)
@@ -304,8 +326,11 @@ mapping clause encdec = IMEVWMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111001 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvmm)
 
-mapping clause assembly = IMEVWMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+mapping clause assembly = IMEVWMMACCTYPE(0b1, vs2, vs1, vd)
+  <-> "vwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
+
+mapping clause assembly = IMEVWMMACCTYPE(0b0, vs2, vs1, vd)
+  <-> "vfwimmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ sep() ^ "v0.scale"
 
 function clause execute IMEVWMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(2, vm, vs2, vs1, vd)
@@ -323,8 +348,11 @@ mapping clause encdec = IMEVQMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111010 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvmm)
 
-mapping clause assembly = IMEVQMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+mapping clause assembly = IMEVQMMACCTYPE(0b1, vs2, vs1, vd)
+  <-> "vqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
+
+mapping clause assembly = IMEVQMMACCTYPE(0b0, vs2, vs1, vd)
+  <-> "vfqimmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ sep() ^ "v0.scale"
 
 function clause execute IMEVQMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(4, vm, vs2, vs1, vd)
@@ -343,8 +371,11 @@ mapping clause encdec = IMEV8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111011 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvmm)
 
-mapping clause assembly = IMEV8WMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "v8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+mapping clause assembly = IMEV8WMMACCTYPE(0b1, vs2, vs1, vd)
+  <-> "v8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
+
+mapping clause assembly = IMEV8WMMACCTYPE(0b0, vs2, vs1, vd)
+  <-> "vf8wimmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ sep() ^ "v0.scale"
 
 function clause execute IMEV8WMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(8, vm, vs2, vs1, vd)
@@ -618,8 +649,8 @@ mapping clause encdec = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010100 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvfmm)
 
-mapping clause assembly = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vfmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+mapping clause assembly = IMEVFMMACCTYPE(0b1, vs2, vs1, vd)
+  <-> "vfmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
 
 function clause execute IMEVFMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_fp_mmacc(1, vm, vs2, vs1, vd)
@@ -634,7 +665,7 @@ mapping clause encdec = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
   when currentlyEnabled(Ext_Zvvfmm)
 
 mapping clause assembly = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vfwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+  <-> "vfwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
 
 function clause execute IMEVFWMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_fp_mmacc(2, vm, vs2, vs1, vd)
@@ -649,7 +680,7 @@ mapping clause encdec = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
   when currentlyEnabled(Ext_Zvvfmm)
 
 mapping clause assembly = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
-  <-> "vfqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_vmask(vm)
+  <-> "vfqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
 
 function clause execute IMEVFQMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_fp_mmacc(4, vm, vs2, vs1, vd)
