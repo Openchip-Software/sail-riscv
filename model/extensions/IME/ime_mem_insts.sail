@@ -59,8 +59,12 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
 
   let 'n = num_elem;
   let 'm = SEW;
-  let (result, mask) : (vector('n, bits('m)), bits('n)) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
+  let (_, mask) : (vector('n, bits('m)), bits('n)) = init_masked_result(num_elem, SEW, LMUL_pow, vd_val, vm_val);
 
+  // Tile element i (which also selects mask bit i) lives at register-group
+  // element tile_reg_idx(i). Only active elements are written: prestart,
+  // inactive and tail elements are left undisturbed.
+  let epr : nat = vlen / SEW;
   foreach (i from 0 to (num_elem - 1)) {
     if mask[i] == 0b1 then {
       set_vstart(to_bits_unsafe(16, i));
@@ -68,26 +72,25 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
                     then ime_tile_transposed_mem_off(i, rows, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
       let byte_offset = mem_off * SEW_bytes;
+      let flat = ime_tile_reg_idx(i, LMUL, lambda_nat, epr);
       match SEW {
         8  => match vmem_read(rs1, to_bits_unsafe(xlen, byte_offset), 1, Load(Vector), false, false, false) {
-               Ok(elem) => write_single_element(8, i, vd, elem),
+               Ok(elem) => write_single_element(8, flat, vd, elem),
                Err(e)   => return e,
              },
         16 => match vmem_read(rs1, to_bits_unsafe(xlen, byte_offset), 2, Load(Vector), false, false, false) {
-               Ok(elem) => write_single_element(16, i, vd, elem),
+               Ok(elem) => write_single_element(16, flat, vd, elem),
                Err(e)   => return e,
              },
         32 => match vmem_read(rs1, to_bits_unsafe(xlen, byte_offset), 4, Load(Vector), false, false, false) {
-               Ok(elem) => write_single_element(32, i, vd, elem),
+               Ok(elem) => write_single_element(32, flat, vd, elem),
                Err(e)   => return e,
              },
         64 => match vmem_read(rs1, to_bits_unsafe(xlen, byte_offset), 8, Load(Vector), false, false, false) {
-               Ok(elem) => write_single_element(64, i, vd, elem),
+               Ok(elem) => write_single_element(64, flat, vd, elem),
                Err(e)   => return e,
              },
       }
-    } else {
-      write_single_element(SEW, i, vd, result[i])
     }
   };
 
@@ -150,6 +153,9 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   let 'n = num_elem;
   let mask : bits('n) = init_masked_source(num_elem, LMUL_pow, vm_val);
 
+  // Tile element i (which also selects mask bit i) lives at register-group
+  // element tile_reg_idx(i).
+  let epr : nat = vlen / SEW;
   foreach (i from 0 to (num_elem - 1)) {
     if mask[i] == 0b1 then {
       set_vstart(to_bits_unsafe(16, i));
@@ -157,7 +163,7 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
                     then ime_tile_transposed_mem_off(i, rows, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
       let byte_offset = mem_off * SEW_bytes;
-      let data = read_single_element(SEW, i, vs3);
+      let data = read_single_element(SEW, ime_tile_reg_idx(i, LMUL, lambda_nat, epr), vs3);
       match SEW {
         8  => match vmem_write(rs1, to_bits_unsafe(xlen, byte_offset), 1, data[7 .. 0], Store(Vector), false, false, false) {
                Ok(true)  => (),
