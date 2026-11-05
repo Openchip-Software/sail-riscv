@@ -435,6 +435,65 @@ function ime_lane16_from64(storage : bits(64), lane : nat) -> bits(16) =
 function ime_lane32_from64(storage : bits(64), lane : nat) -> bits(32) =
   if lane == 0 then storage[31 .. 0] else storage[63 .. 32]
 
+// Read 4-bit logical element `idx` of a vector register group. Two elements
+// share a byte: even idx in the low nibble, odd idx in the high nibble.
+// Example: byte 0x42 holds element 0 = 0x2 and element 1 = 0x4.
+function ime_read_nibble(idx : nat, vs : vregidx) -> bits(4) = {
+  let byte : bits(8) = read_single_element(8, idx / 2, vs);
+  if idx % 2 == 0 then byte[3 .. 0] else byte[7 .. 4]
+}
+
+// OFP4 E2M1 (bias 1, no infinities or NaNs) to FP32. The eight magnitudes
+// {0, 0.5, 1, 1.5, 2, 3, 4, 6} are exact in FP32, so no flags are raised.
+function ime_e2m1_to_fp32(v : bits(4)) -> bits(32) = {
+  let magnitude : bits(32) = match v[2 .. 0] {
+    0b000 => 0x00000000, // 0.0
+    0b001 => 0x3f000000, // 0.5
+    0b010 => 0x3f800000, // 1.0
+    0b011 => 0x3fc00000, // 1.5
+    0b100 => 0x40000000, // 2.0
+    0b101 => 0x40400000, // 3.0
+    0b110 => 0x40800000, // 4.0
+    0b111 => 0x40c00000, // 6.0
+  };
+  [v[3]] @ magnitude[30 .. 0]
+}
+
+// OFP8 to FP64; `altfmt` selects E4M3 (0) or E5M2 (1):
+//   E4M3: bias 7, no infinities, NaN = S.1111.111, max 448.
+//   E5M2: bias 15, IEEE-style infinities (S.11111.00) and NaNs.
+// Every OFP8 value is exact in FP64, so no flags are raised. OFP8 has no
+// signaling NaN; NaN inputs decode to the canonical FP64 NaN.
+// Examples: E4M3 0x7e -> 448.0, E4M3 0x01 -> 2^-9, E5M2 0x01 -> 2^-16.
+function ime_ofp8_to_fp64(altfmt : bits(1), v : bits(8)) -> bits(64) = {
+  let (mbits, bias, e_max) : (nat, nat, nat) = if altfmt == 0b0 then (3, 7, 15) else (2, 15, 31);
+  let sign = [v[7]];
+  let mag : nat = unsigned(v[6 .. 0]);
+  let e : nat = mag / 2 ^ mbits;
+  let m : nat = mag % 2 ^ mbits;
+  let m_max : nat = 2 ^ mbits - 1;
+
+  // Special encodings and zero.
+  if altfmt == 0b0 & e == e_max & m == m_max then return canonical_NaN_D();
+  if altfmt == 0b1 & e == e_max & m != 0 then return canonical_NaN_D();
+  if altfmt == 0b1 & e == e_max then return sign @ ones(11) @ zeros(52);
+  if e == 0 & m == 0 then return sign @ zeros(63);
+
+  // Normal: 1.m * 2^(e - bias). Subnormal: m * 2^(1 - bias - mbits), which
+  // normalizes around the leading one of m at bit position p.
+  var exp : int = e - bias;
+  var frac : bits(52) = to_bits_unsafe(52, m) << (52 - mbits);
+  if e == 0 then {
+    var p : nat = 0;
+    foreach (b from 0 to (mbits - 1)) {
+      if m >= 2 ^ b then { p = b }
+    };
+    exp = p + 1 - bias - mbits;
+    frac = to_bits_unsafe(52, m - 2 ^ p) << (52 - p)
+  };
+  sign @ to_bits_unsafe(11, exp + 1023) @ frac
+}
+
 // Shared unscaled floating-point GEMM executor for the vfmmacc.vv family. The
 // tile/register geometry is identical to the integer execute_ime_int_gemm path
 // (it reuses the same ime_mat_A/B/C_idx helpers); only the accumulation is in
@@ -444,7 +503,8 @@ function ime_lane32_from64(storage : bits(64), lane : nat) -> bits(32) =
 //   W=1: FP16, FP32, FP64 same-width (default IEEE C format).
 //   W=2: FP16/BF16 -> FP32 and FP32 -> FP64.
 //   W=4: FP16/BF16 -> FP64.
-// Microscaled vm=0, OFP4/OFP8, integer-input FP-accumulate, and non-default C
+//   W=8: OFP4 E2M1 -> FP32 and OFP8 E4M3/E5M2 (incl. mixed) -> FP64.
+// Microscaled vm=0, OFP4/OFP8 at W<8, integer-input FP-accumulate, and non-default C
 // altfmt remain out of scope and are rejected by the dispatch.
 //
 // Disclosed reference profile for the implemented rows: G=1, psm=0 (exact
@@ -485,9 +545,9 @@ function execute_ime_fp_gemm(
   assert(EEW > 0);
   let epr_A : nat = vlen / EEW;
 
-  if W != 1 & W != 2 & W != 4 then return Illegal_Instruction();
+  if W != 1 & W != 2 & W != 4 & W != 8 then return Illegal_Instruction();
   if EEW_C % W != 0 then return Illegal_Instruction();
-  if not(EEW == 16 | EEW == 32 | EEW == 64) then return Illegal_Instruction();
+  if not(EEW == 4 | EEW == 8 | EEW == 16 | EEW == 32 | EEW == 64) then return Illegal_Instruction();
   if K_eff == 0 |
      storage_K == 0 |
      M == 0 |
@@ -595,6 +655,40 @@ function execute_ime_fp_gemm(
         }
       }
     },
+    (32, 8) => {
+      foreach (j from 0 to (N - 1)) {
+        foreach (i from 0 to (M - 1)) {
+          let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
+          var acc : bits(32) = read_single_element(32, c_flat, vd);
+          foreach (k from 0 to (K_eff - 1)) {
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
+            let a = ime_e2m1_to_fp32(ime_read_nibble(a_flat, vs1));
+            let b = ime_e2m1_to_fp32(ime_read_nibble(b_flat, vs2));
+            let prod = fp_mul(rm_3b, a, b);
+            acc = fp_add(rm_3b, acc, prod)
+          };
+          write_single_element(32, c_flat, vd, acc)
+        }
+      }
+    },
+    (64, 8) => {
+      foreach (j from 0 to (N - 1)) {
+        foreach (i from 0 to (M - 1)) {
+          let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
+          var acc : bits(64) = read_single_element(64, c_flat, vd);
+          foreach (k from 0 to (K_eff - 1)) {
+            let a_flat = ime_mat_A_idx(i, k, K_eff, LMUL, lambda_value * W, epr_A);
+            let b_flat = ime_mat_B_idx(k, j, K_eff, LMUL, lambda_value * W, epr_A);
+            let a = ime_ofp8_to_fp64(altfmt_A, read_single_element(8, a_flat, vs1));
+            let b = ime_ofp8_to_fp64(altfmt_B, read_single_element(8, b_flat, vs2));
+            let prod = fp_mul(rm_3b, a, b);
+            acc = fp_add(rm_3b, acc, prod)
+          };
+          write_single_element(64, c_flat, vd, acc)
+        }
+      }
+    },
     _ => return Illegal_Instruction()
   };
 
@@ -629,7 +723,10 @@ function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregid
   if W == 2 & SEW == 64 & (vtype[altfmt_A] != 0b0 | vtype[altfmt_B] != 0b0) then return Illegal_Instruction();
   if W == 2 & SEW == 16 then return Illegal_Instruction();
   if W == 4 & SEW != 64 then return Illegal_Instruction();
-  if W != 1 & W != 2 & W != 4 then return Illegal_Instruction();
+  // W=8: SEW<32 is reserved; at SEW=32 only E2M1 (altfmt_A=altfmt_B=0) exists.
+  if W == 8 & SEW < 32 then return Illegal_Instruction();
+  if W == 8 & SEW == 32 & (vtype[altfmt_A] != 0b0 | vtype[altfmt_B] != 0b0) then return Illegal_Instruction();
+  if W != 1 & W != 2 & W != 4 & W != 8 then return Illegal_Instruction();
 
   match SEW {
     8  => Illegal_Instruction(),
@@ -684,3 +781,19 @@ mapping clause assembly = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
 
 function clause execute IMEVFQMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_fp_mmacc(4, vm, vs2, vs1, vd)
+
+// vf8wmmacc.vv — octuple-widening (W=8) floating-point matrix
+// multiply-accumulate. A/B hold SEW/8-bit inputs: OFP4 E2M1 at SEW=32 and
+// OFP8 E4M3/E5M2 (per operand via altfmt_A/B) at SEW=64; vm=0 microscaling
+// remains illegal.
+union clause instruction = IMEVF8WMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
+
+mapping clause encdec = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
+  <-> 0b010111 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
+  when currentlyEnabled(Ext_Zvvfmm)
+
+mapping clause assembly = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
+  <-> "vf8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
+
+function clause execute IMEVF8WMMACCTYPE(vm, vs2, vs1, vd) =
+  execute_ime_fp_mmacc(8, vm, vs2, vs1, vd)
