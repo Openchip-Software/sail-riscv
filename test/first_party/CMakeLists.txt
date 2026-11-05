@@ -166,6 +166,7 @@ add_ime_test("test_ime_vwmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
 add_ime_test("test_ime_vqmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
 add_ime_test("test_ime_v8wmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
 add_ime_test("test_ime_vfmmacc.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_vf8wmmacc.S" "rv64gcv" 64 "ime_override.json")
 
 list(LENGTH ime_tests ime_tests_len)
 math(EXPR ime_test_last "${ime_tests_len} - 1")

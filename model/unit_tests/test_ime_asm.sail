@@ -34,4 +34,6 @@ function test_ime_mmacc_assembly() -> unit = {
   assert(assembly(IMEVFWMMACCTYPE(0b1, v4, v2, v8)) == "vfwmmacc.vv v8, v2, v4");
   assert(assembly(IMEVFWMMACCTYPE(0b0, v4, v2, v8)) == "vfwmmacc.vv v8, v2, v4, v0.scale");
   assert(assembly(IMEVFQMMACCTYPE(0b0, v4, v2, v8)) == "vfqmmacc.vv v8, v2, v4, v0.scale");
+  assert(assembly(IMEVF8WMMACCTYPE(0b1, v4, v2, v8)) == "vf8wmmacc.vv v8, v2, v4");
+  assert(assembly(IMEVF8WMMACCTYPE(0b0, v4, v2, v8)) == "vf8wmmacc.vv v8, v2, v4, v0.scale");
 }
