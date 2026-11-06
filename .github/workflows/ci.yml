@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - integrated-matrix-extension
   pull_request:
   workflow_dispatch:
   merge_group:
