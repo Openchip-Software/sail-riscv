@@ -25,6 +25,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
   - `rs2=x0` selects the natural leading dimension `LD = lambda * LMUL`.
+  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`); masked stores may read `v0`.
 - Transposing tile load/store:
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
   - Implemented for `SEW=8,16,32,64`, sharing the same mask, tail, prestart, `vstart`, and memory-exception behavior as `vmtl.v`/`vmts.v`.
@@ -84,6 +85,9 @@ The initial IME tests live under `test/first_party/src/`:
 - `test_ime_tile_ls_vl.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `LD=2`, `VLEN=256`.
   - Checks `VL=3` and `VL=4` do not trap, and `VL=0`/`VL=1` `vmttl.v`/`vmtts.v` do not trap.
+- `test_ime_tile_ls_v0.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=1`, `VL=4`, `LD=4`, `VLEN=256`.
+  - Checks masked `vmtl.v`/`vmttl.v` into `v0` trap; masked `vmtl.v` into `v8` and masked `vmts.v`/`vmtts.v` from `v0` do not.
 - `test_ime_vmmacc.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Checks a signed 4x2 by 2x2 non-widening GEMM and verifies inactive C tile columns remain untouched.
