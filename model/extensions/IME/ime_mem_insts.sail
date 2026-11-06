@@ -46,11 +46,13 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
 
-  // rs2=x0 selects the natural leading dimension: lambda*LMUL for the
-  // order-preserving traversal, VLEN/(SEW*lambda) for the transposing one.
-  let LD : nat = if rs2 == zreg then {
+  // A zero value in rs2 (x0 or any register holding 0) selects the natural
+  // leading dimension: lambda*LMUL for the order-preserving traversal,
+  // VLEN/(SEW*lambda) for the transposing one.
+  let rs2_val = unsigned(X(rs2));
+  let LD : nat = if rs2_val == 0 then {
     if transposed then vlen / (SEW * lambda_nat) else cols
-  } else unsigned(X(rs2));
+  } else rs2_val;
 
   let vm_val = read_vmask(num_elem, vm, zvreg);
   let vd_val = read_vreg(num_elem, SEW, LMUL_pow, vd);
@@ -135,11 +137,13 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
 
-  // rs2=x0 selects the natural leading dimension: lambda*LMUL for the
-  // order-preserving traversal, VLEN/(SEW*lambda) for the transposing one.
-  let LD : nat = if rs2 == zreg then {
+  // A zero value in rs2 (x0 or any register holding 0) selects the natural
+  // leading dimension: lambda*LMUL for the order-preserving traversal,
+  // VLEN/(SEW*lambda) for the transposing one.
+  let rs2_val = unsigned(X(rs2));
+  let LD : nat = if rs2_val == 0 then {
     if transposed then vlen / (SEW * lambda_nat) else cols
-  } else unsigned(X(rs2));
+  } else rs2_val;
 
   let vm_val = read_vmask(num_elem, vm, zvreg);
   let 'n = num_elem;
