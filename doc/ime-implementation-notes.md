@@ -23,6 +23,7 @@ This is the status note for the initial Sail implementation loop for the draft R
 - Order-preserving tile load/store:
   - `vmtl.v` and `vmts.v` decode for `Zvvmtls`.
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
+  - Register layout (both tile modes): tile element `i` lives at register-group element `ime_tile_reg_idx(i, LMUL, lambda, VLEN/SEW)`, the layout the matrix multiplies read. The mask bit is indexed by tile element `i`. Only active elements are written; prestart, inactive and tail elements stay undisturbed. Example `LMUL=2`, `lambda=2`, `VLEN/SEW=8`: tile elements `0..7` land at `[0,1,8,9,2,3,10,11]`.
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
   - `rs2=x0` selects the natural leading dimension `LD = lambda * LMUL`.
 - Transposing tile load/store:
@@ -75,6 +76,9 @@ The initial IME tests live under `test/first_party/src/`:
 - `test_ime_tile_ls.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, and `LD=4`.
   - Checks `vmtl.v` loads offsets `[0,1,4,5]` and `vmts.v` stores only those offsets.
+- `test_ime_tile_ls_lmul.S`
+  - Configures `SEW=32`, `LMUL=2`, `VL=16`, `VLEN=256`.
+  - Checks the `tile_reg_idx` register layout for `vmtl.v`/`vmts.v` (`lambda=1`, `LD=2`, plus a masked load) and for all four tile loads/stores at `lambda=2`, `LD=4`.
 - `test_ime_transpose_tile_ls.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Subcase 1 checks `vmttl.v`/`vmtts.v` with explicit `LD=4` use transposed offsets `[0,4,1,5]` and leave non-addressed `dst` slots untouched.
@@ -133,7 +137,7 @@ Latest targeted verification in this workspace completed with all seven IME test
 
 ## Known limitations and shortcuts
 
-- Both the order-preserving and transposing tile load/store modes are implemented; the remaining reserved tile modes (`10`, `11`) decode to illegal instruction. Transposing only transposes `SEW`-bit storage elements and is exercised for `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`; broader lambda/LMUL/SEW coverage is not yet tested.
+- Both the order-preserving and transposing tile load/store modes are implemented; the remaining reserved tile modes (`10`, `11`) decode to illegal instruction. Transposing only transposes `SEW`-bit storage elements and is exercised for `SEW=32` at `LMUL=1`, `lambda=2`, `VL=4` and `LMUL=2`, `lambda=2`, `VL=16`; other SEW values are not yet tested.
 - The `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) integer instruction encodings are enabled. The unscaled floating-point matrix loop now covers same-width `vfmmacc.vv` for FP16/FP32/FP64, `vfwmmacc.vv` for FP16/BF16→FP32 and FP32→FP64, and `vfqmmacc.vv` for FP16/BF16→FP64. Microscaling behavior remains out of scope. No Int4 limitation: the packed-subelement helper represents 4-bit nibble lanes, so the Int4 rows for W=2, W=4, and W=8 are implemented and tested.
 - `vmmacc.vv`, `vwmmacc.vv`, `vqmmacc.vv`, and `v8wmmacc.vv` require `vm=1` and `vstart=0` as in the draft restriction used for this loop; masked matrix multiply is not implemented, and the `vm=0` microscaled forms (`vfwimmacc.vv`, `vfqmmacc.vv`, `vf8wimmacc.vv`, etc.) raise illegal instruction.
 - Integer row/subextension legality is simplified: enabling `Zvvmm` enables the initial non-widening integer rows implemented here instead of modeling each fine-grained row as a separate configuration flag.

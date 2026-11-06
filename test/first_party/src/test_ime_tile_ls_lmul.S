@@ -13,6 +13,16 @@
 # 3. A masked vmtl.v with only even tile elements active must load them
 #    into v8 (group elements 0..7) and leave v9 undisturbed: the mask is
 #    indexed by tile element, and no other group element is written.
+#
+# Cases 4-7 use lambda=2 (L2), LD=4, so linesize=4 and tile element i
+# lands at group element (i % 4 / 2) * 8 + (i / 4) * 2 + i % 2:
+#   [0,1,8,9, 2,3,10,11, 4,5,12,13, 6,7,14,15]
+# The transposing forms read/write memory element (i % 4) * 4 + i / 4.
+#
+# 4. vmtl.v  of 0..15 must give v8:v9 = 0,1,4,5,8,9,12,13,2,3,6,7,...
+# 5. vmts.v  of v8:v9 = 0..15 must store 0,1,8,9,2,3,10,11,4,5,...
+# 6. vmttl.v of 0..15 must give v8:v9 = 0,4,1,5,2,6,3,7,8,12,9,13,...
+# 7. vmtts.v of v8:v9 = 0..15 must store 0,2,4,6,1,3,5,7,8,10,...
 
 .global main
 main:
@@ -64,6 +74,52 @@ main:
     call compare
     bnez a4, fail
 
+    li a1, 4
+
+    # ---- 4. vmtl.v, lambda=2 ----
+    vmv.v.i v8, -1
+    la a0, seq
+    # vmtl.v v8, (a0), a1, L2
+    .word 0x52b57407
+    la a2, dump
+    vse32.v v8, (a2)
+    la a3, exp_load_l2
+    call compare
+    bnez a4, fail
+
+    # ---- 5. vmts.v, lambda=2 ----
+    la a0, seq
+    vle32.v v8, (a0)
+    la a0, dump
+    # vmts.v v8, (a0), a1, L2
+    .word 0x52b57427
+    la a2, dump
+    la a3, exp_store_l2
+    call compare
+    bnez a4, fail
+
+    # ---- 6. vmttl.v, lambda=2 ----
+    vmv.v.i v8, -1
+    la a0, seq
+    # vmttl.v v8, (a0), a1, L2
+    .word 0x56b57407
+    la a2, dump
+    vse32.v v8, (a2)
+    la a3, exp_tload_l2
+    call compare
+    bnez a4, fail
+
+    # ---- 7. vmtts.v, lambda=2 ----
+    la a0, seq
+    vle32.v v8, (a0)
+    la a0, dump
+    # vmtts.v v8, (a0), a1, L2
+    .word 0x56b57427
+    la a2, dump
+    la a3, exp_tstore_l2
+    call compare
+    bnez a4, fail
+
     li a0, 0
     mv ra, t6
     ret
@@ -96,5 +152,13 @@ exp_store:
     .word 0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
 exp_masked:
     .word 0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1
+exp_load_l2:
+    .word 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15
+exp_store_l2:
+    .word 0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15
+exp_tload_l2:
+    .word 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15
+exp_tstore_l2:
+    .word 0, 2, 4, 6, 1, 3, 5, 7, 8, 10, 12, 14, 9, 11, 13, 15
 dump:
     .fill 64, 1, 0
