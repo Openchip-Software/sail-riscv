@@ -25,13 +25,15 @@ This is the status note for the initial Sail implementation loop for the draft R
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
   - Register layout (both tile modes): tile element `i` lives at register-group element `ime_tile_reg_idx(i, LMUL, lambda, VLEN/SEW)`, the layout the matrix multiplies read. The mask bit is indexed by tile element `i`. Only active elements are written; prestart, inactive and tail elements stay undisturbed. Example `LMUL=2`, `lambda=2`, `VLEN/SEW=8`: tile elements `0..7` land at `[0,1,8,9,2,3,10,11]`.
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
-  - `rs2=x0` selects the natural leading dimension `LD = lambda * LMUL`.
+  - A zero value in `rs2` (`x0` or any register holding 0) selects the natural leading dimension `LD = lambda * LMUL`.
+  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`); masked stores may read `v0`.
 - Transposing tile load/store:
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
   - Implemented for `SEW=8,16,32,64`, sharing the same mask, tail, prestart, `vstart`, and memory-exception behavior as `vmtl.v`/`vmts.v`.
   - The active storage-element tile shape is `cols = lambda * LMUL` columns by `rows = VL / cols` rows.
+  - `VL=0` is a legal no-op. Shortcut (both tile modes): `VL` not a multiple of `cols` is not checked; the partial trailing line is transferred, also for `VL < cols` (current spec traps; IME TG intends "largest multiple of `lambda * LMUL` that fits `VL`").
   - Uses the transposing memory address formula in `ime_tile_transposed_mem_off`: `mem_off = (i % cols) * LD + (i / cols)`. For a 2x2 tile with `LD=4` this yields offsets `[0,4,1,5]`, versus `[0,1,4,5]` for the order-preserving traversal.
-  - `rs2=x0` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
+  - A zero value in `rs2` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
   - Transposing transposes `SEW`-bit storage elements only; it does not unpack, transpose, or repack `W>1` logical elements that may be packed inside a `SEW`-bit storage element.
   - Inactive/tail destination elements for `vmttl.v` remain undisturbed; inactive/tail elements for `vmtts.v` do not write memory or fault.
 - Basic non-widening integer matrix multiply-accumulate:
@@ -67,6 +69,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - Same-width default IEEE rows are implemented for FP16, FP32, and FP64.
   - `vfwmmacc.vv` (W=2, funct6 `0x15`) is implemented for FP16/BF16→FP32 and FP32→FP64; BF16 inputs are selected per operand with `altfmt_A/B=1`.
   - `vfqmmacc.vv` (W=4, funct6 `0x16`) is implemented for FP16/BF16→FP64.
+  - `vf8wmmacc.vv` (W=8, funct6 `0x17`) is implemented for OFP4 E2M1→FP32 (`SEW=32`, `altfmt_A=altfmt_B=0`) and OFP8 E4M3/E5M2→FP64 (`SEW=64`, per-operand `altfmt_A/B`, mixed allowed). `SEW<32` and `altfmt_A/B=1` at `SEW=32` raise illegal instruction. OFP inputs decode exactly to the C format (no flags); OFP8 has no signaling NaN, so E4M3/E5M2 NaNs decode to the canonical NaN.
   - Implemented rows use the disclosed unscaled profile `G=1`, `psm=0`, `rnd=frm`; products and accumulation use existing SoftFloat helpers and accrue active-lane `fflags`.
 
 ## Targeted tests
@@ -83,6 +86,15 @@ The initial IME tests live under `test/first_party/src/`:
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Subcase 1 checks `vmttl.v`/`vmtts.v` with explicit `LD=4` use transposed offsets `[0,4,1,5]` and leave non-addressed `dst` slots untouched.
   - Subcase 2 checks `rs2=x0` natural `LD = VLEN / (SEW * lambda) = 4` (not the ordered `lambda * LMUL = 2`).
+- `test_ime_tile_ls_vl.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `LD=2`, `VLEN=256`.
+  - Checks `VL=3` and `VL=4` do not trap, and `VL=0`/`VL=1` `vmttl.v`/`vmtts.v` do not trap.
+- `test_ime_tile_ls_v0.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=1`, `VL=4`, `LD=4`, `VLEN=256`.
+  - Checks masked `vmtl.v`/`vmttl.v` into `v0` trap; masked `vmtl.v` into `v8` and masked `vmts.v`/`vmtts.v` from `v0` do not.
+- `test_ime_tile_ls_ld0.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=8`, `VLEN=256`, `rs2=a1` holding 0.
+  - Checks all four tile loads/stores use the natural `LD` (2 order-preserving, 4 transposing).
 - `test_ime_vmmacc.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Checks a signed 4x2 by 2x2 non-widening GEMM and verifies inactive C tile columns remain untouched.
@@ -109,6 +121,10 @@ The initial IME tests live under `test/first_party/src/`:
   - Exercises the staged unscaled FP rows at `VLEN=256`, using `.word` encodings for `vfmmacc.vv`, `vfwmmacc.vv`, and `vfqmmacc.vv`.
   - Covers same-width FP16/FP32/FP64, `vfwmmacc` FP16→FP32, BF16→FP32, FP32→FP64, and `vfqmmacc` FP16/BF16→FP64 with exact values.
   - Includes the FP32 inactive-column sentinel case that verifies inactive sNaNs do not update C or accrue `fflags`.
+- `test_ime_vf8wmmacc.S`
+  - `vf8wmmacc.vv v16, v8, v12` as `.word 0x5ec41857`, `VLEN=256`, `lambda=2`.
+  - E2M1→FP32 (`LMUL=1`, inactive C sentinels), E4M3×E4M3→FP64 (max normal, subnormal), E4M3×E5M2→FP64 with `LMUL=2` (E5M2 max and subnormal), and E5M2×E4M3 special values (`inf*0` → NaN + NV, OFP8 NaN → canonical NaN without flags).
+  - Illegal: `vm=0`, `SEW=16`, `SEW=32` with `altfmt_A=1`, `vstart!=0`.
 - `test/first_party/src/ime_override.json`
   - Enables `Zvvmm`, `Zvvmtls`, `Zvvmttls`, and `Zvvfmm` for the targeted first-party tests.
 - `model/unit_tests/test_ime_vtype.sail`
@@ -119,8 +135,8 @@ The initial IME tests live under `test/first_party/src/`:
 From the repository root:
 
 ```sh
-cmake --build build --target generated_sail_riscv_model sail_riscv_sim build_rv64d_test_ime_v8wmmacc.S build_rv64d_test_ime_vqmmacc.S build_rv64d_test_ime_vwmmacc.S build_rv64d_test_ime_vfmmacc.S build_rv64d_test_ime_transpose_tile_ls.S build_rv64d_test_ime_tile_ls.S build_rv64d_test_ime_vmmacc.S -j$(nproc)
-ctest --test-dir build -R 'first_party_rv64d_test_ime_(v8wmmacc|vqmmacc|vwmmacc|vfmmacc|transpose_tile_ls|tile_ls|vmmacc)\.S' --output-on-failure -V
+cmake --build build --target generated_sail_riscv_model sail_riscv_sim build_rv64d_test_ime_v8wmmacc.S build_rv64d_test_ime_vqmmacc.S build_rv64d_test_ime_vwmmacc.S build_rv64d_test_ime_vfmmacc.S build_rv64d_test_ime_vf8wmmacc.S build_rv64d_test_ime_transpose_tile_ls.S build_rv64d_test_ime_tile_ls.S build_rv64d_test_ime_vmmacc.S -j$(nproc)
+ctest --test-dir build -R 'first_party_rv64d_test_ime_(v8wmmacc|vqmmacc|vwmmacc|vfmmacc|vf8wmmacc|transpose_tile_ls|tile_ls|vmmacc)\.S' --output-on-failure -V
 ```
 
 These commands assume the build directory has already been configured and that the local Sail and RISC-V first-party test toolchain prerequisites are available. The simulator runs the IME tests with:
@@ -129,16 +145,16 @@ These commands assume the build directory has already been configured and that t
 --enable-experimental-extensions --config build/config/rv64d_v256_e64.json --config-override test/first_party/src/ime_override.json
 ```
 
-Latest targeted verification in this workspace completed with all seven IME tests passing:
+Latest targeted verification (`ctest -R test_ime_`) completed with all ten IME tests passing:
 
 ```text
-100% tests passed, 0 tests failed out of 7
+100% tests passed, 0 tests failed out of 10
 ```
 
 ## Known limitations and shortcuts
 
 - Both the order-preserving and transposing tile load/store modes are implemented; the remaining reserved tile modes (`10`, `11`) decode to illegal instruction. Transposing only transposes `SEW`-bit storage elements and is exercised for `SEW=32` at `LMUL=1`, `lambda=2`, `VL=4` and `LMUL=2`, `lambda=2`, `VL=16`; other SEW values are not yet tested.
-- The `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) integer instruction encodings are enabled. The unscaled floating-point matrix loop now covers same-width `vfmmacc.vv` for FP16/FP32/FP64, `vfwmmacc.vv` for FP16/BF16→FP32 and FP32→FP64, and `vfqmmacc.vv` for FP16/BF16→FP64. Microscaling behavior remains out of scope. No Int4 limitation: the packed-subelement helper represents 4-bit nibble lanes, so the Int4 rows for W=2, W=4, and W=8 are implemented and tested.
+- The `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) integer instruction encodings are enabled. The unscaled floating-point matrix loop now covers same-width `vfmmacc.vv` for FP16/FP32/FP64, `vfwmmacc.vv` for FP16/BF16→FP32 and FP32→FP64, `vfqmmacc.vv` for FP16/BF16→FP64, and `vf8wmmacc.vv` for E2M1→FP32 and E4M3/E5M2→FP64. Microscaling behavior remains out of scope. No Int4 limitation: the packed-subelement helper represents 4-bit nibble lanes, so the Int4 rows for W=2, W=4, and W=8 are implemented and tested.
 - `vmmacc.vv`, `vwmmacc.vv`, `vqmmacc.vv`, and `v8wmmacc.vv` require `vm=1` and `vstart=0` as in the draft restriction used for this loop; masked matrix multiply is not implemented, and the `vm=0` microscaled forms (`vfwimmacc.vv`, `vfqmmacc.vv`, `vf8wimmacc.vv`, etc.) raise illegal instruction.
 - Integer row/subextension legality is simplified: enabling `Zvvmm` enables the initial non-widening integer rows implemented here instead of modeling each fine-grained row as a separate configuration flag.
 - C tile-tail columns are left undisturbed by the integer GEMM implementation; this matches the targeted tests and should be revisited if the final spec requires tail-agnostic updates for inactive physical columns.
@@ -167,9 +183,10 @@ Implemented pieces:
 2. Same-width `vfmmacc.vv` rows for FP16, FP32, and FP64 (`W=1`, `altfmt_A=altfmt_B=0`, default IEEE C).
 3. `vfwmmacc.vv` rows for FP16→FP32, BF16→FP32 (`altfmt_A/B=1` for BF16 inputs; mixed FP16/BF16 follows the same per-operand conversion path), and FP32→FP64.
 4. `vfqmmacc.vv` rows for FP16/BF16→FP64.
+5. `vf8wmmacc.vv` rows for OFP4 E2M1→FP32 and OFP8 E4M3/E5M2 (incl. mixed)→FP64.
 
 Still deferred:
-- `vf8wmmacc.vv`, OFP8/OFP4 input formats, non-default C accumulator `altfmt`, round-to-odd group rounding, disclosed `psm=1`, microscaling (`v0.scale`/`vbs`), integer-input FP-accumulate forms, and fine-grained per-format extension gating.
+- OFP8/OFP4 inputs for `vfmmacc`/`vfwmmacc`/`vfqmmacc` (W<8), non-default C accumulator `altfmt`, round-to-odd group rounding, disclosed `psm=1`, microscaling (`v0.scale`/`vbs`), integer-input FP-accumulate forms, and fine-grained per-format extension gating.
 
 Test requirements for the FP loop:
 - First-party assembly tests should continue to use `.word` encodings until assembler mnemonic support exists.
@@ -190,6 +207,6 @@ Open questions before broadening scope:
 1. Add rounding-sensitive tests for the disclosed `G=1`, `psm=0`, `rnd=frm` profile, including directed rounding modes and `NX` checks.
 2. Add explicit special-value tests for sNaN invalid, qNaN/default-NaN behavior, `0*inf`, and inactive/tail non-participation in the new FP16/BF16/FP64 rows.
 3. Decide whether to add the draft C `altfmt` field and fine-grained row/subextension legality before enabling non-default C/BF16 accumulator rows.
-4. Add `vf8wmmacc.vv`, OFP8/OFP4, microscaling support, and associated `vtype.vbs` behavior only after unscaled default-format FP remains stable.
+4. Add OFP8/OFP4 rows for W<8, microscaling support, and associated `vtype.vbs` behavior only after unscaled default-format FP remains stable.
 5. Replace simplified row/subextension legality with the full extension implication/configuration table once the draft naming is settled.
 6. Expand tests across lambda/LMUL/SEW combinations, masked/tail behavior, reserved encodings, and trap/restart cases.

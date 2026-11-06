@@ -117,13 +117,12 @@ function ime_tile_ordered_mem_off(i : nat, linesize : nat, LD : nat) -> nat = {
 }
 
 // Memory element offset for the transposing tile traversal. The active tile
-// has `rows` storage-element rows and `cols = lambda * LMUL` storage-element
-// columns; the flat index i selects (row, col) row-major but addresses the
-// transpose: offset = col * LD + row. For a 2x2 tile with LD=4 this yields
-// the offsets [0, 4, 1, 5] for flat indices [0, 1, 2, 3].
-function ime_tile_transposed_mem_off(i : nat, rows : nat, cols : nat, LD : nat) -> nat = {
+// has `cols = lambda * LMUL` storage-element columns; the flat index i
+// selects (row, col) row-major but addresses the transpose:
+// offset = col * LD + row. For a 2x2 tile with LD=4 this yields the offsets
+// [0, 4, 1, 5] for flat indices [0, 1, 2, 3].
+function ime_tile_transposed_mem_off(i : nat, cols : nat, LD : nat) -> nat = {
   assert(cols > 0);
-  assert(rows > 0);
   let row = i / cols;
   let col = i % cols;
   col * LD + row
