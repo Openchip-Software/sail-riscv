@@ -224,6 +224,9 @@ foreach(idx RANGE 0 ${ime_test_last} 4)
         NAME "first_party_${arch}_${test_source}"
         COMMAND $<TARGET_FILE:sail_riscv_sim> --enable-experimental-extensions --config ${config} --config-override ${override_config} ${elf}
     )
+    set_property(TEST "first_party_${arch}_${test_source}"
+        PROPERTY LABELS TestAtBuildTime
+    )
 endforeach()
 
 list(LENGTH tests tests_len)
