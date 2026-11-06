@@ -24,7 +24,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - `vmtl.v` and `vmts.v` decode for `Zvvmtls`.
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
-  - `rs2=x0` selects the natural leading dimension `LD = lambda * LMUL`.
+  - A zero value in `rs2` (`x0` or any register holding 0) selects the natural leading dimension `LD = lambda * LMUL`.
   - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`); masked stores may read `v0`.
 - Transposing tile load/store:
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
@@ -32,7 +32,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - The active storage-element tile shape is `cols = lambda * LMUL` columns by `rows = VL / cols` rows.
   - `VL=0` is a legal no-op. Shortcut (both tile modes): `VL` not a multiple of `cols` is not checked; the partial trailing line is transferred, also for `VL < cols` (current spec traps; IME TG intends "largest multiple of `lambda * LMUL` that fits `VL`").
   - Uses the transposing memory address formula in `ime_tile_transposed_mem_off`: `mem_off = (i % cols) * LD + (i / cols)`. For a 2x2 tile with `LD=4` this yields offsets `[0,4,1,5]`, versus `[0,1,4,5]` for the order-preserving traversal.
-  - `rs2=x0` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
+  - A zero value in `rs2` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
   - Transposing transposes `SEW`-bit storage elements only; it does not unpack, transpose, or repack `W>1` logical elements that may be packed inside a `SEW`-bit storage element.
   - Inactive/tail destination elements for `vmttl.v` remain undisturbed; inactive/tail elements for `vmtts.v` do not write memory or fault.
 - Basic non-widening integer matrix multiply-accumulate:
@@ -88,6 +88,9 @@ The initial IME tests live under `test/first_party/src/`:
 - `test_ime_tile_ls_v0.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=1`, `VL=4`, `LD=4`, `VLEN=256`.
   - Checks masked `vmtl.v`/`vmttl.v` into `v0` trap; masked `vmtl.v` into `v8` and masked `vmts.v`/`vmtts.v` from `v0` do not.
+- `test_ime_tile_ls_ld0.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=8`, `VLEN=256`, `rs2=a1` holding 0.
+  - Checks all four tile loads/stores use the natural `LD` (2 order-preserving, 4 transposing).
 - `test_ime_vmmacc.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Checks a signed 4x2 by 2x2 non-widening GEMM and verifies inactive C tile columns remain untouched.
