@@ -35,6 +35,7 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   if not(valid_vtype()) |
      illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vd, EMUL_pow)) |
+     not(valid_rd_mask(vd, vm)) |
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0
   then return Illegal_Instruction();
