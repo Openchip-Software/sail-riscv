@@ -250,6 +250,7 @@ check64:
     ret
 
 # Record mcause in s1 and skip the trapping instruction.
+.balign 4
 trap_handler:
     csrr s1, mcause
     csrr t0, mepc
