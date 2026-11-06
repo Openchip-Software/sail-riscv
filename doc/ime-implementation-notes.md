@@ -29,6 +29,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
   - Implemented for `SEW=8,16,32,64`, sharing the same mask, tail, prestart, `vstart`, and memory-exception behavior as `vmtl.v`/`vmts.v`.
   - The active storage-element tile shape is `cols = lambda * LMUL` columns by `rows = VL / cols` rows.
+  - `VL=0` is a legal no-op. Shortcut (both tile modes): `VL` not a multiple of `cols` is not checked; the partial trailing line is transferred, also for `VL < cols` (current spec traps; IME TG intends "largest multiple of `lambda * LMUL` that fits `VL`").
   - Uses the transposing memory address formula in `ime_tile_transposed_mem_off`: `mem_off = (i % cols) * LD + (i / cols)`. For a 2x2 tile with `LD=4` this yields offsets `[0,4,1,5]`, versus `[0,1,4,5]` for the order-preserving traversal.
   - `rs2=x0` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
   - Transposing transposes `SEW`-bit storage elements only; it does not unpack, transpose, or repack `W>1` logical elements that may be packed inside a `SEW`-bit storage element.
@@ -80,6 +81,9 @@ The initial IME tests live under `test/first_party/src/`:
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Subcase 1 checks `vmttl.v`/`vmtts.v` with explicit `LD=4` use transposed offsets `[0,4,1,5]` and leave non-addressed `dst` slots untouched.
   - Subcase 2 checks `rs2=x0` natural `LD = VLEN / (SEW * lambda) = 4` (not the ordered `lambda * LMUL = 2`).
+- `test_ime_tile_ls_vl.S`
+  - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `LD=2`, `VLEN=256`.
+  - Checks `VL=3` and `VL=4` do not trap, and `VL=0`/`VL=1` `vmttl.v`/`vmtts.v` do not trap.
 - `test_ime_vmmacc.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Checks a signed 4x2 by 2x2 non-widening GEMM and verifies inactive C tile columns remain untouched.

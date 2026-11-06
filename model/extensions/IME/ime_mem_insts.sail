@@ -44,9 +44,6 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
-  let VL = unsigned(vl);
-  let rows = VL / cols;
-  if transposed & rows == 0 then return Illegal_Instruction();
 
   // rs2=x0 selects the natural leading dimension: lambda*LMUL for the
   // order-preserving traversal, VLEN/(SEW*lambda) for the transposing one.
@@ -65,7 +62,7 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
     if mask[i] == 0b1 then {
       set_vstart(to_bits_unsafe(16, i));
       let mem_off = if transposed
-                    then ime_tile_transposed_mem_off(i, rows, cols, LD)
+                    then ime_tile_transposed_mem_off(i, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
       let byte_offset = mem_off * SEW_bytes;
       match SEW {
@@ -136,9 +133,6 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   let cols = lambda_nat * LMUL;
   if cols == 0 then return Illegal_Instruction();
   assert(lambda_nat > 0);
-  let VL = unsigned(vl);
-  let rows = VL / cols;
-  if transposed & rows == 0 then return Illegal_Instruction();
 
   // rs2=x0 selects the natural leading dimension: lambda*LMUL for the
   // order-preserving traversal, VLEN/(SEW*lambda) for the transposing one.
@@ -154,7 +148,7 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
     if mask[i] == 0b1 then {
       set_vstart(to_bits_unsafe(16, i));
       let mem_off = if transposed
-                    then ime_tile_transposed_mem_off(i, rows, cols, LD)
+                    then ime_tile_transposed_mem_off(i, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
       let byte_offset = mem_off * SEW_bytes;
       let data = read_single_element(SEW, i, vs3);
