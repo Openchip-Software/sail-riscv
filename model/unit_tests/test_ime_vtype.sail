@@ -31,12 +31,16 @@ function test_ime_vtype_high_fields_are_addressable() -> unit = {
     vbs = 0b1,
     altfmt_A = 0b1,
     altfmt_B = 0b0,
+    altfmt = 0b1,
   ];
 
   assert(vtype[vlambda] == 0b010);
   assert(vtype[vbs] == 0b1);
   assert(vtype[altfmt_A] == 0b1);
   assert(vtype[altfmt_B] == 0b0);
+  // altfmt (Zvfbfa position) is vtype bit 8 and selects the C format.
+  assert(vtype[altfmt] == 0b1);
+  assert(vtype.bits[8] == bitone);
 
   vtype = saved_vtype;
 }

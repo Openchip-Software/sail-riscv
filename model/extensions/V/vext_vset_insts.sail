@@ -101,6 +101,7 @@ private function execute_vsetvl_type(
   bs_field : bits(1),
   altfmt_A_field : bits(1),
   altfmt_B_field : bits(1),
+  altfmt_field : bits(1),
   avl : xlenbits,
   requires_fixed_vlmax : bool,
   rd : regidx,
@@ -134,6 +135,7 @@ private function execute_vsetvl_type(
   let bs_field_new = if ime_fields_enabled then bs_field else 0b0;
   let altfmt_A_field_new = if ime_fields_enabled then altfmt_A_field else 0b0;
   let altfmt_B_field_new = if ime_fields_enabled then altfmt_B_field else 0b0;
+  let altfmt_field_new = if ime_fields_enabled then altfmt_field else 0b0;
 
   vl = to_bits(calculate_new_vl(avl, VLMAX));
   X(rd) = zero_extend(vl);
@@ -144,6 +146,7 @@ private function execute_vsetvl_type(
     vbs = bs_field_new,
     altfmt_A = altfmt_A_field_new,
     altfmt_B = altfmt_B_field_new,
+    altfmt = altfmt_field_new,
     vma = ma,
     vta = ta,
     vsew = sew,
@@ -168,7 +171,7 @@ mapping clause encdec = VSETVLI(vtr, ma, ta, sew, lmul, rs1, rd)
   when currentlyEnabled(Ext_Zve32x)
 
 function clause execute VSETVLI(vtr, ma, ta, sew, lmul, rs1, rd) = {
-  if vtr != zeros()
+  if not(ime_vtr_legal(vtr))
   then return handle_illegal_vtype(rd);
 
   let avl =
@@ -178,7 +181,7 @@ function clause execute VSETVLI(vtr, ma, ta, sew, lmul, rs1, rd) = {
 
   let requires_fixed_vlmax = rd == zreg & rs1 == zreg;
 
-  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], avl, requires_fixed_vlmax, rd)
+  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, requires_fixed_vlmax, rd)
 }
 
 
@@ -205,7 +208,7 @@ function clause execute VSETVL(rs2, rs1, rd) = {
 
   let requires_fixed_vlmax = rd == zreg & rs1 == zreg;
 
-  execute_vsetvl_type(vt[vma], vt[vta], vt[vsew], vt[vlmul], vt[vlambda], vt[vbs], vt[altfmt_A], vt[altfmt_B], avl, requires_fixed_vlmax, rd)
+  execute_vsetvl_type(vt[vma], vt[vta], vt[vsew], vt[vlmul], vt[vlambda], vt[vbs], vt[altfmt_A], vt[altfmt_B], vt[altfmt], avl, requires_fixed_vlmax, rd)
 }
 
 mapping clause assembly = VSETVL(rs2, rs1, rd)
@@ -219,11 +222,11 @@ mapping clause encdec = VSETIVLI(0b0 @ vtr, ma, ta, sew, lmul, uimm, rd)
   when currentlyEnabled(Ext_Zve32x)
 
 function clause execute VSETIVLI(vtr, ma, ta, sew, lmul, uimm, rd) = {
-  if vtr != zeros()
+  if not(ime_vtr_legal(vtr))
   then return handle_illegal_vtype(rd);
 
   let avl : xlenbits = zero_extend(uimm);
-  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], avl, false, rd)
+  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, false, rd)
 }
 
 mapping clause assembly = VSETIVLI(vtr, ma, ta, sew, lmul, uimm, rd)

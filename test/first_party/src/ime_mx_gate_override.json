@@ -1,0 +1,10 @@
+{
+  "extensions": {
+    "Zvvxofp8fp16mm": {
+      "supported": true
+    },
+    "Zvvxni8fp32mm": {
+      "supported": true
+    }
+  }
+}

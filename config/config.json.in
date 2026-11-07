@@ -992,6 +992,90 @@
     "Zvvfmm": {
       "supported": false
     },
+    "Zvvxi4bf16mm": {
+      "supported": false
+    },
+    "Zvvxi4fp16mm": {
+      "supported": false
+    },
+    "Zvvxi4fp32mm": {
+      "supported": false
+    },
+    "Zvvxi8bf16mm": {
+      "supported": false
+    },
+    "Zvvxi8fp16mm": {
+      "supported": false
+    },
+    "Zvvxi8fp32mm": {
+      "supported": false
+    },
+    "Zvvxi8fp64mm": {
+      "supported": false
+    },
+    "Zvvxni4bf16mm": {
+      "supported": false
+    },
+    "Zvvxni4fp16mm": {
+      "supported": false
+    },
+    "Zvvxni4fp32mm": {
+      "supported": false
+    },
+    "Zvvxni8bf16mm": {
+      "supported": false
+    },
+    "Zvvxni8fp16mm": {
+      "supported": false
+    },
+    "Zvvxni8fp32mm": {
+      "supported": false
+    },
+    "Zvvxni8fp64mm": {
+      "supported": false
+    },
+    "Zvvxnofp4bf16mm": {
+      "supported": false
+    },
+    "Zvvxnofp4fp16mm": {
+      "supported": false
+    },
+    "Zvvxnofp4fp32mm": {
+      "supported": false
+    },
+    "Zvvxnofp8bf16mm": {
+      "supported": false
+    },
+    "Zvvxnofp8fp16mm": {
+      "supported": false
+    },
+    "Zvvxnofp8fp32mm": {
+      "supported": false
+    },
+    "Zvvxnofp8fp64mm": {
+      "supported": false
+    },
+    "Zvvxofp4bf16mm": {
+      "supported": false
+    },
+    "Zvvxofp4fp16mm": {
+      "supported": false
+    },
+    "Zvvxofp4fp32mm": {
+      "supported": false
+    },
+    "Zvvxofp8bf16mm": {
+      "supported": false
+    },
+    "Zvvxofp8fp16mm": {
+      "supported": false
+    },
+    "Zvvxofp8fp32mm": {
+      "supported": false
+    },
+    "Zvvxofp8fp64mm": {
+      "supported": false
+    },
     "Zvbb": {
       "supported": true
     },

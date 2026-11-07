@@ -240,6 +240,8 @@ extensions {
         extensions/V/vext_utils_insts.sail,
         extensions/V/vext_fp_utils_insts.sail,
         extensions/IME/ime_utils.sail,
+        extensions/IME/ime_fp.sail,
+        extensions/IME/ime_mx.sail,
         extensions/IME/ime_mem_insts.sail,
         extensions/V/vext_vset_insts.sail,
         extensions/V/vext_arith_insts.sail,
@@ -620,12 +622,13 @@ postlude {
 
 unit_tests {
   after postlude
-  requires prelude, core, sys, exceptions, postlude, V_core, V_instructions
+  requires prelude, core, sys, exceptions, postlude, FD_core, V_core, V_instructions
 
   files
     unit_tests/test_mstatus.sail,
     unit_tests/test_ime_vtype.sail,
     unit_tests/test_ime_asm.sail,
+    unit_tests/test_ime_fp.sail,
 }
 
 main {

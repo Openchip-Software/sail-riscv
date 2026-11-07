@@ -3,11 +3,47 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
 
+// Any floating-point-input microscaling (Zvvxofp*/Zvvxnofp*) extension.
+function ime_fp_mx_any_enabled() -> bool =
+  currentlyEnabled(Ext_Zvvxofp4fp16mm) |
+  currentlyEnabled(Ext_Zvvxnofp4fp16mm) |
+  currentlyEnabled(Ext_Zvvxofp4bf16mm) |
+  currentlyEnabled(Ext_Zvvxnofp4bf16mm) |
+  currentlyEnabled(Ext_Zvvxofp8fp16mm) |
+  currentlyEnabled(Ext_Zvvxnofp8fp16mm) |
+  currentlyEnabled(Ext_Zvvxofp8bf16mm) |
+  currentlyEnabled(Ext_Zvvxnofp8bf16mm) |
+  currentlyEnabled(Ext_Zvvxofp8fp32mm) |
+  currentlyEnabled(Ext_Zvvxnofp8fp32mm) |
+  currentlyEnabled(Ext_Zvvxofp4fp32mm) |
+  currentlyEnabled(Ext_Zvvxnofp4fp32mm) |
+  currentlyEnabled(Ext_Zvvxofp8fp64mm) |
+  currentlyEnabled(Ext_Zvvxnofp8fp64mm)
+
+// Any integer-input microscaling (Zvvxi*/Zvvxni*) extension.
+function ime_int_mx_any_enabled() -> bool =
+  currentlyEnabled(Ext_Zvvxi8fp16mm) |
+  currentlyEnabled(Ext_Zvvxni8fp16mm) |
+  currentlyEnabled(Ext_Zvvxi8bf16mm) |
+  currentlyEnabled(Ext_Zvvxni8bf16mm) |
+  currentlyEnabled(Ext_Zvvxi8fp32mm) |
+  currentlyEnabled(Ext_Zvvxni8fp32mm) |
+  currentlyEnabled(Ext_Zvvxi8fp64mm) |
+  currentlyEnabled(Ext_Zvvxni8fp64mm) |
+  currentlyEnabled(Ext_Zvvxi4fp16mm) |
+  currentlyEnabled(Ext_Zvvxni4fp16mm) |
+  currentlyEnabled(Ext_Zvvxi4bf16mm) |
+  currentlyEnabled(Ext_Zvvxni4bf16mm) |
+  currentlyEnabled(Ext_Zvvxi4fp32mm) |
+  currentlyEnabled(Ext_Zvvxni4fp32mm)
+
 function ime_vtype_fields_enabled() -> bool =
   currentlyEnabled(Ext_Zvvmm) |
   currentlyEnabled(Ext_Zvvmtls) |
   currentlyEnabled(Ext_Zvvmttls) |
-  currentlyEnabled(Ext_Zvvfmm)
+  currentlyEnabled(Ext_Zvvfmm) |
+  ime_fp_mx_any_enabled() |
+  ime_int_mx_any_enabled()
 
 function ime_lambda_field_to_value(field : bits(3)) -> int =
   match field {
@@ -57,10 +93,17 @@ function ime_vtype_fields_clear(vt : Vtype) -> bool =
   vt[vlambda] == 0b000 &
   vt[vbs] == 0b0 &
   vt[altfmt_A] == 0b0 &
-  vt[altfmt_B] == 0b0
+  vt[altfmt_B] == 0b0 &
+  vt[altfmt] == 0b0
 
 function ime_vtype_fields_legal(vt : Vtype) -> bool =
   ime_vtype_fields_enabled() | ime_vtype_fields_clear(vt)
+
+// vsetvli/vsetivli zimm[10:8]. zimm[8] is altfmt (Zvfbfa position), which
+// selects the C accumulator format and is legal only when IME is enabled.
+// zimm[10:9] stay reserved. Example: 0b001 sets altfmt=1 (BF16 C at SEW=16).
+function ime_vtr_legal(vtr : bits(3)) -> bool =
+  vtr[2 .. 1] == 0b00 & (vtr[0] == bitzero | ime_vtype_fields_enabled())
 
 function ime_lambda_field_to_nat(field : bits(3)) -> nat =
   match field {

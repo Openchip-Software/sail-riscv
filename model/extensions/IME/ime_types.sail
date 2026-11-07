@@ -15,6 +15,90 @@ function clause currentlyEnabled(Ext_Zvvmttls) =
 function clause currentlyEnabled(Ext_Zvvfmm) =
   hartSupports(Ext_Zvvfmm) & currentlyEnabled(Ext_Zve32x)
 
+function clause currentlyEnabled(Ext_Zvvxi4bf16mm) =
+  hartSupports(Ext_Zvvxi4bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi4fp16mm) =
+  hartSupports(Ext_Zvvxi4fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi4fp32mm) =
+  hartSupports(Ext_Zvvxi4fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi8bf16mm) =
+  hartSupports(Ext_Zvvxi8bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi8fp16mm) =
+  hartSupports(Ext_Zvvxi8fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi8fp32mm) =
+  hartSupports(Ext_Zvvxi8fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxi8fp64mm) =
+  hartSupports(Ext_Zvvxi8fp64mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni4bf16mm) =
+  hartSupports(Ext_Zvvxni4bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni4fp16mm) =
+  hartSupports(Ext_Zvvxni4fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni4fp32mm) =
+  hartSupports(Ext_Zvvxni4fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni8bf16mm) =
+  hartSupports(Ext_Zvvxni8bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni8fp16mm) =
+  hartSupports(Ext_Zvvxni8fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni8fp32mm) =
+  hartSupports(Ext_Zvvxni8fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxni8fp64mm) =
+  hartSupports(Ext_Zvvxni8fp64mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp4bf16mm) =
+  hartSupports(Ext_Zvvxnofp4bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp4fp16mm) =
+  hartSupports(Ext_Zvvxnofp4fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp4fp32mm) =
+  hartSupports(Ext_Zvvxnofp4fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp8bf16mm) =
+  hartSupports(Ext_Zvvxnofp8bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp8fp16mm) =
+  hartSupports(Ext_Zvvxnofp8fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp8fp32mm) =
+  hartSupports(Ext_Zvvxnofp8fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxnofp8fp64mm) =
+  hartSupports(Ext_Zvvxnofp8fp64mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp4bf16mm) =
+  hartSupports(Ext_Zvvxofp4bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp4fp16mm) =
+  hartSupports(Ext_Zvvxofp4fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp4fp32mm) =
+  hartSupports(Ext_Zvvxofp4fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp8bf16mm) =
+  hartSupports(Ext_Zvvxofp8bf16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp8fp16mm) =
+  hartSupports(Ext_Zvvxofp8fp16mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp8fp32mm) =
+  hartSupports(Ext_Zvvxofp8fp32mm) & currentlyEnabled(Ext_Zve32x)
+
+function clause currentlyEnabled(Ext_Zvvxofp8fp64mm) =
+  hartSupports(Ext_Zvvxofp8fp64mm) & currentlyEnabled(Ext_Zve32x)
+
 // IME tile load/store mode field (bits[2:1] of imm7).
 enum ime_tile_mode = { IME_TILE_ORDERED, IME_TILE_TRANSPOSED, IME_TILE_RESERVED_2, IME_TILE_RESERVED_3 }
 
