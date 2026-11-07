@@ -71,29 +71,3 @@ function test_ime_fp_vs_softfloat() -> unit = {
 
   fcsr = saved_fcsr
 }
-
-$[test]
-function test_ime_e8m0_decode() -> unit = {
-  let saved_fcsr = fcsr;
-
-  // 2^0 is exact everywhere; 0xFF is NaN.
-  assert(ime_e8m0_decode(IME_FP16, 0x7f)[15 .. 0] == 0x3c00);
-  assert(ime_e8m0_decode(IME_BF16, 0x7f)[15 .. 0] == 0x3f80);
-  assert(ime_e8m0_decode(IME_FP32, 0xff)[31 .. 0] == 0x7fc00000);
-
-  // 2^127 overflows FP16 to +inf with OF|NX; it is exact in BF16/FP32.
-  fcsr[FFLAGS] = zeros();
-  assert(ime_e8m0_decode(IME_FP16, 0xfe)[15 .. 0] == 0x7c00);
-  assert(fcsr[FFLAGS] == 0b00101);
-  assert(ime_e8m0_decode(IME_BF16, 0xfe)[15 .. 0] == 0x7f00);
-
-  // 2^-127 is subnormal but exact in FP32 (no flags); in FP16 it flushes to
-  // +0 with UF|NX.
-  fcsr[FFLAGS] = zeros();
-  assert(ime_e8m0_decode(IME_FP32, 0x00)[31 .. 0] == 0x00400000);
-  assert(fcsr[FFLAGS] == 0b00000);
-  assert(ime_e8m0_decode(IME_FP16, 0x00)[15 .. 0] == 0x0000);
-  assert(fcsr[FFLAGS] == 0b00011);
-
-  fcsr = saved_fcsr
-}

@@ -72,7 +72,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - `vfwmmacc.vv` (W=2, funct6 `0x15`) is implemented for FP16/BF16→FP32 and FP32→FP64; BF16 inputs are selected per operand with `altfmt_A/B=1`.
   - `vfqmmacc.vv` (W=4, funct6 `0x16`) is implemented for FP16/BF16→FP64.
   - `vf8wmmacc.vv` (W=8, funct6 `0x17`) is implemented for OFP4 E2M1→FP32 (`SEW=32`, `altfmt_A=altfmt_B=0`) and OFP8 E4M3/E5M2→FP64 (`SEW=64`, per-operand `altfmt_A/B`, mixed allowed). `SEW<32` and `altfmt_A/B=1` at `SEW=32` raise illegal instruction. OFP inputs decode exactly to the C format (no flags); OFP8 has no signaling NaN, so E4M3/E5M2 NaNs decode to the canonical NaN.
-  - Implemented rows use the disclosed unscaled profile `G=1`, `psm=0`, `rnd=frm`; products and accumulation use existing SoftFloat helpers and accrue active-lane `fflags`.
+  - All FP rows run on the exact engine of the MX loop with the disclosed profile `G=1`, `psm=0`, `rnd=frm` (one rounding of each group's exact `W`-product sum, one rounding of the addition into C) and accrue active-lane `fflags`.
 
 ## Targeted tests
 
@@ -170,9 +170,9 @@ The current implementation adds unscaled floating-point matrix multiply-accumula
 Initial disclosure for implemented unscaled FP rows:
 
 - Grouping: `G=1`.
-- Partial-sum mode: `psm=0` / exact-reference group formation, implemented initially through SoftFloat operations in the accumulator format for supported IEEE rows.
+- Partial-sum mode: `psm=0`, exact group sums (see the MX loop).
 - Group rounding: `rnd=frm`.
-- Microscaling (`v0.scale`/`vbs`) and the `altfmt` C format are implemented by the MX loop below; the rows listed here keep their SoftFloat path.
+- Microscaling (`v0.scale`/`vbs`) and the `altfmt` C format are implemented by the MX loop below, which also executes the rows listed here.
 
 Implemented pieces:
 
@@ -180,7 +180,7 @@ Implemented pieces:
    - requires `vm=1` and `vstart=0`;
    - rejects unsupported `SEW`, `W`, and alternate input/output format combinations explicitly;
    - reuses `ime_mat_A_idx`, `ime_mat_B_idx`, `ime_mat_C_idx`, `ime_group_size_to_pow`, and active-column `VL/(lambda*LMUL)` geometry from the integer path;
-   - uses dynamic `frm` through existing SoftFloat helper calls, so reserved `frm` is rejected by `valid_fp_op`;
+   - uses dynamic `frm`; reserved `frm` is rejected by `valid_fp_op`;
    - ORs returned exception flags into `fflags` with `accrue_fflags` only for active output computations.
 2. Same-width `vfmmacc.vv` rows for FP16, FP32, and FP64 (`W=1`, `altfmt_A=altfmt_B=0`, default IEEE C).
 3. `vfwmmacc.vv` rows for FP16→FP32, BF16→FP32 (`altfmt_A/B=1` for BF16 inputs; mixed FP16/BF16 follows the same per-operand conversion path), and FP32→FP64.
@@ -221,29 +221,30 @@ ime_mx.sail         geometry, encoding-map legality, fp_gemm / scaled GEMMs
 ime_fp.sail         exact values (unbounded ints) + IEEE rounding with RISC-V flags
 ```
 
-- Engine (`ime_fp.sail`): decodes E2M1, E4M3, E5M2, FP16, BF16, FP32, FP64, and E8M0 to an exact value; exact multiply/add; correctly rounded conversion to FP16/BF16/FP32/FP64 under `frm` with `NX/UF/OF/NV` (tininess after rounding). `model/unit_tests/test_ime_fp.sail` cross-checks engine add/mul against SoftFloat (3000 FP16/FP32/FP64 cases, all five rounding modes, bits and flags).
-- Disclosure for every engine row: `G=1`, `psm=0`, `rnd=frm`. One group is one sub-dot-product of `W` exact products, rounded once to C, scaled (`vm=0`), and added to C.
+- Engine (`ime_fp.sail`): decodes E2M1, E4M3, E5M2, FP16, BF16, FP32, and FP64 to an exact value; exact multiply/add; correctly rounded conversion to FP16/BF16/FP32/FP64 under `frm` with `NX/UF/OF/NV` (tininess after rounding). `model/unit_tests/test_ime_fp.sail` cross-checks engine add/mul against SoftFloat (3000 FP16/FP32/FP64 cases, all five rounding modes, bits and flags).
+- Disclosure for every FP row (`vm=1` and `vm=0`): `G=1`, `psm=0`, `rnd=frm`. Per group, the `W` products are summed exactly, multiplied exactly by the E8M0 scale pair `2^(eA+eB-254)` (`vm=0`), rounded once to C, and added to C (rounded once more). Integer MX: the exact block dot product is scaled exactly, rounded once, and added.
 - Rows, all with `vm=0` at BS=32 (`bs=0`) and BS=16 (`bs=1`):
   - `vfwmmacc.vv` `SEW=16`: OFP8 (all E4M3/E5M2 A/B pairs) → FP16/BF16; also `vm=1`.
   - `vfqmmacc.vv` `SEW=16`: E2M1 → FP16/BF16; `SEW=32`: OFP8 → FP32; also `vm=1`.
-  - `vf8wmmacc.vv` `SEW=32`: E2M1 → FP32; `SEW=64`: OFP8 → FP64 (`vm=1` stays on the SoftFloat path).
+  - `vf8wmmacc.vv` `SEW=32`: E2M1 → FP32; `SEW=64`: OFP8 → FP64; also `vm=1`.
+  - The older unscaled rows (`vfmmacc` FP16/FP32/FP64, `vfwmmacc` FP16/BF16→FP32 and FP32→FP64, `vfqmmacc` FP16/BF16→FP64) use the same engine.
   - `vfwimmacc.vv` `SEW=16`: MXINT8 → FP16/BF16. `vfqimmacc.vv` `SEW=16`: MXINT4 → FP16/BF16; `SEW=32`: MXINT8 → FP32. `vf8wimmacc.vv` `SEW=32`: MXINT4 → FP32; `SEW=64`: MXINT8 → FP64.
 - Legality: geometry per `decode_gemm_geometry` (`EMUL_C` up to 16), `vstart=0`, valid `frm`, `SEW*lambda >= 16`, BS=16 requires `W*LMUL <= SEW`, no operand group may overlap `v0`, and the encoding-map cell must name an enabled extension.
 - Extension gating: a `vm=0` cell needs its `Zvvx*` (BS=32; also satisfied by `Zvvxn*`) or `Zvvxn*` (BS=16). A `vm=1` engine row needs `Zvvfmm` or an MX extension that implies it. The FP MMA opcodes decode when `Zvvfmm` or any FP MX extension is enabled; the integer ones when `Zvvmm` or any integer MX extension is enabled.
 - Tests (`test/first_party/src/test_ime_mx_*.S`) are generated by `ime_mx_gen.py`, an independent Python reference (exact `Fraction` arithmetic, self-checked against numpy rounding). Rerun it after changing data or cases: `python3 test/first_party/src/ime_mx_gen.py`.
   - `vfwmmacc`, `vfqmmacc`, `vf8wmmacc`, `vfwimmacc`, `vfqimmacc`, `vf8wimmacc`: every format combination listed above, `vm=1` (where new) and both block sizes, all five rounding modes, `K_eff=64` (2 or 4 blocks), one sNaN tail column.
-  - `special`: NaN scale with early termination (a later block would overflow), E8M0 `0xFE` overflowing FP16, `inf*0`, tiny scales underflowing FP32, BF16 scale overflow, a partial block (`K_eff=16`), NaN B scale.
+  - `special`: NaN scale with early termination (a later block would overflow), large and tiny scales leaving the C range, `inf*0`, BF16 scale overflow, a partial block (`K_eff=16`), NaN B scale, and two `exact-scale` cases where scaling the rounded sum would tie the other way (FP32 and FP16 subnormal results).
   - `illegal`: reserved rows, BS=16 `W*LMUL>SEW`, `v0` overlap, `vstart!=0`, bad `VL`, `frm=5`, `vmmacc`/`vfmmacc` `vm=0`, SEW=8 OFP8 C.
   - `gate` (with `ime_mx_gate_override.json`): BS=32/BS=16 cells, implied base rows, and rows that stay illegal.
   - `test_ime_vtype_altfmt.S`: `altfmt` via `vsetvli`/`vsetivli`/`vsetvl`.
+  - `test_ime_fp_rows.S` (with `ime_override.json`): the older unscaled rows, random data in all rounding modes, plus a `group-tie` case per `W>1` row where rounding each product into C separately would give a different result.
 - `ime_mx_override.json` enables all IME and MX extensions; `ime_override.json` stays without MX so the older `vm=0`-illegal checks keep their meaning.
 
 Shortcuts and open spec questions:
 - OFP4 → OFP8 accumulator rows (`vfwmmacc` `SEW=8`, `Zvvx[n]ofp4ofp8mm`) are deferred: the spec does not define OFP8 accumulator overflow (E4M3 has no infinity). They raise illegal instruction and have no extension flag.
-- `decode_scale` has no rounding-mode argument; the model converts E8M0 with round-to-nearest-even (2^127 → FP16 +inf, OF|NX).
+- Scales deviate from the specification text on purpose: `read_block_scales` converts `scale_A` and `scale_B` to the C format and rounds their product there, then `fp_scaled_gemm` multiplies the rounded group sum by it. The model instead multiplies the exact group sum by the exact `2^(eA+eB-254)` and rounds once. Scales therefore raise no flags of their own; range effects show up when the scaled sum is rounded.
 - The sign of an exact zero partial sum follows `frm` (`-0` only under RDN, or when all terms are `-0`).
 - Base FP rows keep the coarse `Zvvfmm` gate rather than fine-grained `Zvvo*` flags.
-- The older SoftFloat rows (`vfmmacc`; `vfwmmacc` FP16/BF16→FP32, FP32→FP64; `vfqmmacc` → FP64; `vf8wmmacc` `vm=1`) round each product separately. That deviates from `G=1` grouping for `W>1`; moving them onto the engine would make them spec-exact.
 
 ## Next-loop checklist
 

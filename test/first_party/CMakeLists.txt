@@ -181,6 +181,7 @@ add_ime_test("test_ime_mx_special.S" "rv64gcv" 64 "ime_mx_override.json")
 add_ime_test("test_ime_mx_illegal.S" "rv64gcv" 64 "ime_mx_override.json")
 add_ime_test("test_ime_mx_gate.S" "rv64gcv" 64 "ime_mx_gate_override.json")
 add_ime_test("test_ime_vtype_altfmt.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_fp_rows.S" "rv64gcv" 64 "ime_override.json")
 
 list(LENGTH ime_tests ime_tests_len)
 math(EXPR ime_test_last "${ime_tests_len} - 1")

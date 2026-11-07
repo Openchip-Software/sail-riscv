@@ -8,13 +8,17 @@
 // fp_gemm, fp_scaled_gemm, int_scaled_gemm, read_block_scales) on top of the
 // exact engine in ime_fp.sail.
 //
-// Disclosed FP group profile for every row handled here: G=1, psm=0 (exact
-// partial sum), rnd=frm. One group is one sub-dot-product of W products:
+// Disclosed FP group profile for every row: G=1, psm=0 (exact partial sum),
+// rnd=frm. One group is one sub-dot-product of W products:
 //
 //   k:   |<- W ->|<- W ->| ...            (one LMUL=1 step = lambda groups)
 //   S  = exact sum of the W products of the group
-//   C += round_frm(S)                                     (vm=1)
-//   C += round_frm(blk_scale * round_frm(S))              (vm=0)
+//   C  = round_frm(C + round_frm(S))                      (vm=1)
+//   C  = round_frm(C + round_frm(S * 2^(eA + eB - 254)))  (vm=0)
+//
+// The E8M0 scale pair multiplies S exactly; it is never converted to the C
+// format first. This deviates from the specification text (read_block_scales
+// rounds scale_A * scale_B in the C format), which is believed to be wrong.
 //
 // v0 scale layout (vm=0): 16-bit element p = m * R + s holds the E8M0 pair
 // for row/column m and K block s; bits [7:0] scale A rows, [15:8] scale B
@@ -26,6 +30,10 @@ let IME_FP_GROUPING = 1
 
 // Width of one (scale_A, scale_B) E8M0 pair in v0.
 let IME_SCALE_PAIR_BITS = 16
+
+// E8M0 scale: exponent-only, bias 127, 0xFF is NaN.
+let IME_E8M0_BIAS = 127
+let IME_E8M0_NAN : bits(8) = 0xFF
 
 // Microscaling block sizes selected by vtype.bs.
 let IME_MX_BLOCK_BS0 = 32
@@ -78,7 +86,7 @@ function ime_gemm_geometry(W : nat) -> option(ime_gemm_geom) = {
   if tmod_int(EEW_C, W) != 0 then return None();
 
   let EEW_A = ime_div(EEW_C, W);
-  if not(EEW_A == 4 | EEW_A == 8 | EEW_A == 16 | EEW_A == 32) then return None();
+  if not(EEW_A == 4 | EEW_A == 8 | EEW_A == 16 | EEW_A == 32 | EEW_A == 64) then return None();
   let K_eff : nat = lambda * W * LMUL;
   let M = ime_div(vlen, EEW_C * lambda);
   let line : nat = lambda * LMUL;
@@ -107,7 +115,7 @@ function ime_gemm_geometry(W : nat) -> option(ime_gemm_geom) = {
   })
 }
 
-// Read input element idx of width EEW_A (4 or 8), zero-extended.
+// Read input element idx of width EEW_A (4..64), zero-extended.
 // 4-bit elements pack two per byte, the even index in the low nibble.
 function ime_read_in(EEW_A : int, idx : nat, vs : vregidx) -> bits(64) =
   match EEW_A {
@@ -115,8 +123,11 @@ function ime_read_in(EEW_A : int, idx : nat, vs : vregidx) -> bits(64) =
       let byte : bits(8) = read_single_element(8, ime_div(idx, 2), vs);
       zero_extend(64, if tmod_int(idx, 2) == 0 then byte[3 .. 0] else byte[7 .. 4])
     },
-    8 => zero_extend(64, read_single_element(8, idx, vs)),
-    _ => internal_error(__FILE__, __LINE__, "IME: unsupported input width"),
+    8  => zero_extend(64, read_single_element(8, idx, vs)),
+    16 => zero_extend(64, read_single_element(16, idx, vs)),
+    32 => zero_extend(64, read_single_element(32, idx, vs)),
+    64 => read_single_element(64, idx, vs),
+    _  => internal_error(__FILE__, __LINE__, "IME: unsupported input width"),
   }
 
 // Signed integer value of an EEW_A-bit input element (MXINT4/MXINT8).
@@ -142,17 +153,16 @@ function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
-// read_block_scales: combined block scale scale_A[i,s] * scale_B[j,s] in
-// the C format and whether it is NaN. Accrues decode and multiply flags.
-function ime_block_scales(g : ime_gemm_geom, i : nat, j : nat, s : nat,
-                          fmt_C : ime_fp_fmt, rm : int) -> (bits(64), bool) = {
+// read_block_scales: the exact combined block scale
+// scale_A[i,s] * scale_B[j,s] = 2^(eA + eB - 254), or NaN when either E8M0
+// value is 0xFF. Raises no flags. Example: eA=0x80, eB=0x7e -> 2^0.
+function ime_block_scales(g : ime_gemm_geom, i : nat, j : nat, s : nat) -> ime_fpx = {
   let R = ime_div(g.lambda * g.EEW_C, IME_SCALE_PAIR_BITS);
-  let pair_A : bits(16) = read_single_element(16, i * R + s, zvreg);
-  let pair_B : bits(16) = read_single_element(16, j * R + s, zvreg);
-  let sA = ime_e8m0_decode(fmt_C, pair_A[7 .. 0]);
-  let sB = ime_e8m0_decode(fmt_C, pair_B[15 .. 8]);
-  let blk = ime_fp_mul(fmt_C, sA, sB, rm);
-  (blk, ime_fp_bits_is_nan(fmt_C, blk))
+  let eA : bits(8) = read_single_element(16, i * R + s, zvreg)[7 .. 0];
+  let eB : bits(8) = read_single_element(16, j * R + s, zvreg)[15 .. 8];
+  if eA == IME_E8M0_NAN | eB == IME_E8M0_NAN
+  then IME_FPX_NAN()
+  else IME_FPX_FIN(0b0, 1, unsigned(eA) + unsigned(eB) - 2 * IME_E8M0_BIAS)
 }
 
 // fp_group_sum (psm=0): exact sum of A[i,k] * B^T[k,j] for k in [k_lo, k_hi].
@@ -193,10 +203,10 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
       foreach (s from 0 to (S_blocks - 1)) {
         // A NaN combined scale forces C[i,j] to NaN and ends its evaluation.
         if not(nan_out) then {
-          let (blk_scale, is_nan) : (bits(64), bool) =
-            if scaling == IME_MX_SCALED then ime_block_scales(g, i, j, s, fmt_C, rm)
-            else (zeros(), false);
-          nan_out = is_nan;
+          let blk_scale : ime_fpx =
+            if scaling == IME_MX_SCALED then ime_block_scales(g, i, j, s)
+            else IME_FPX_FIN(0b0, 1, 0);
+          nan_out = ime_fpx_is_nan(blk_scale);
 
           if not(nan_out) then {
             let blk_k_lo : nat = s * block_size;
@@ -217,10 +227,7 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
                   let k_lo : nat = step_k_lo + g0 * g.W;
                   let k_hi = ime_nat(k_lo + IME_FP_GROUPING * g.W - 1);
                   let S = ime_fp_group_sum(g, i, j, k_lo, k_hi, fmt_A, fmt_B, rm, vs1, vs2);
-                  let S_bits = ime_fp_round(fmt_C, S, rm);
-                  let term = if scaling == IME_MX_SCALED
-                             then ime_fp_mul(fmt_C, blk_scale, S_bits, rm)
-                             else S_bits;
+                  let term = ime_fp_round(fmt_C, ime_fpx_mul(S, blk_scale), rm);
                   acc = ime_fp_add(fmt_C, acc, term, rm)
                 }
               }
@@ -234,8 +241,8 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
   }
 }
 
-// int_scaled_gemm: per block, the exact signed integer dot product is
-// converted to the C format, scaled, and accumulated (all rounded per frm).
+// int_scaled_gemm: per block, the exact signed integer dot product is scaled
+// exactly, rounded once to the C format, and added to C (rounded per frm).
 function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
                              vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> unit = {
   let block_size = ime_mx_block_size();
@@ -249,8 +256,8 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
 
       foreach (s from 0 to (S_blocks - 1)) {
         if not(nan_out) then {
-          let (blk_scale, is_nan) = ime_block_scales(g, i, j, s, fmt_C, rm);
-          nan_out = is_nan;
+          let blk_scale = ime_block_scales(g, i, j, s);
+          nan_out = ime_fpx_is_nan(blk_scale);
 
           if not(nan_out) then {
             let k_lo : nat = s * block_size;
@@ -262,8 +269,8 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
               let b_flat = ime_mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
               dot = dot + ime_read_in_signed(g.EEW_A, a_flat, vs1) * ime_read_in_signed(g.EEW_A, b_flat, vs2)
             };
-            let fp_sum = ime_int_to_fp(fmt_C, dot, rm);
-            acc = ime_fp_add(fmt_C, acc, ime_fp_mul(fmt_C, blk_scale, fp_sum, rm), rm)
+            let term = ime_fp_round(fmt_C, ime_fpx_mul(ime_fpx_of_int(dot), blk_scale), rm);
+            acc = ime_fp_add(fmt_C, acc, term, rm)
           }
         }
       };
@@ -289,36 +296,34 @@ function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
   then currentlyEnabled(x) | currentlyEnabled(xn)
   else currentlyEnabled(xn)
 
-// The FP rows executed by this file for vm=1 (the existing rows stay on the
-// SoftFloat path in ime_mem_insts.sail).
-function ime_fp_engine_row(W : nat, SEW : int) -> bool =
-  (W == 2 & SEW == 16) | (W == 4 & (SEW == 16 | SEW == 32))
-
-// vm=1 legality of an engine row. altfmt selects the C format; OFP8 inputs
-// accept every altfmt_A/altfmt_B pair, OFP4 inputs require both 0.
+// vm=1 legality per tbl-fp-encoding-map for the implemented rows. altfmt
+// selects the C format; OFP4 inputs require altfmt_A = altfmt_B = 0.
 function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
-  let ofp4_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
+  let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
+  let zvvfmm = currentlyEnabled(Ext_Zvvfmm);
   match (W, SEW) {
+    // FP16, FP32, FP64 with same-format C.
+    (1, 16) => default_inputs & not(bf16_c) & zvvfmm,
+    (1, 32) => default_inputs & not(bf16_c) & zvvfmm,
+    (1, 64) => default_inputs & not(bf16_c) & zvvfmm,
+    // FP16/BF16 -> FP32, FP32 -> FP64, FP16/BF16 -> FP64.
+    (2, 32) => not(bf16_c) & zvvfmm,
+    (2, 64) => default_inputs & not(bf16_c) & zvvfmm,
+    (4, 64) => not(bf16_c) & zvvfmm,
+    // OFP8 -> FP16/BF16, OFP4 -> FP16/BF16, OFP8 -> FP32.
     (2, 16) => if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp8bf16mm, Ext_Zvvxnofp8bf16mm)
                else ime_fp_base_ext_ok(Ext_Zvvxofp8fp16mm, Ext_Zvvxnofp8fp16mm),
-    (4, 16) => ofp4_inputs &
+    (4, 16) => default_inputs &
                (if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp4bf16mm, Ext_Zvvxnofp4bf16mm)
                 else ime_fp_base_ext_ok(Ext_Zvvxofp4fp16mm, Ext_Zvvxnofp4fp16mm)),
     (4, 32) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp32mm, Ext_Zvvxnofp8fp32mm),
+    // OFP4 -> FP32, OFP8 -> FP64.
+    (8, 32) => default_inputs & not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp4fp32mm, Ext_Zvvxnofp4fp32mm),
+    (8, 64) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp64mm, Ext_Zvvxnofp8fp64mm),
     _       => false,
   }
 }
-
-// vm=1 extension check for the existing SoftFloat rows. The W=8 rows are
-// also implied by their MX extensions; the others need Zvvfmm.
-function ime_fp_legacy_row_ok(W : nat, SEW : int) -> bool =
-  vtype[altfmt] == 0b0 &
-  (match (W, SEW) {
-    (8, 32) => ime_fp_base_ext_ok(Ext_Zvvxofp4fp32mm, Ext_Zvvxnofp4fp32mm),
-    (8, 64) => ime_fp_base_ext_ok(Ext_Zvvxofp8fp64mm, Ext_Zvvxnofp8fp64mm),
-    _       => currentlyEnabled(Ext_Zvvfmm),
-  })
 
 // vm=0 legality of an FP-input MX row.
 function ime_fp_mx_row_ok(W : nat, SEW : int) -> bool = {
@@ -373,8 +378,7 @@ function ime_gemm_groups_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd 
 // Execution entry points.
 // ---------------------------------------------------------------------------
 
-// vfwmmacc.vv / vfqmmacc.vv / vf8wmmacc.vv with vm=0, and the vm=1 engine
-// rows (ime_fp_engine_row).
+// vfmmacc.vv / vfwmmacc.vv / vfqmmacc.vv / vf8wmmacc.vv, vm=1 and vm=0.
 function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let rm_3b = fcsr[FRM];

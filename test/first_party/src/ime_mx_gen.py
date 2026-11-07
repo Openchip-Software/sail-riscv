@@ -8,7 +8,9 @@ accrued fflags. Each generated test loads A, B, C and v0, runs one matrix
 instruction (as a .word encoding), and compares the C register group bytes
 and fflags. A failing test exits with the number of the failing case.
 
-Disclosed FP profile mirrored here: G=1, psm=0 (exact), rnd=frm.
+Disclosed FP profile mirrored here: G=1, psm=0 (exact), rnd=frm. Per group,
+the W products are summed exactly, scaled exactly by 2^(eA + eB - 254)
+(vm=0), rounded once to the C format, and added to C (rounded once more).
 
 Usage:  ime_mx_gen.py [output_dir]      (default: this script's directory)
 """
@@ -192,16 +194,6 @@ def fp_add(fmt, a, b, rm, fl):
     return rnd(fmt, add(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), rm, fl), rm, fl)
 
 
-def fp_mul(fmt, a, b, rm, fl):
-    return rnd(fmt, mul(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), fl), rm, fl)
-
-
-def e8m0_decode(fmt, v, fl):
-    if v == E8M0_NAN:
-        return canonical_nan(fmt)
-    return rnd(fmt, ("fin", 0, Fraction(2) ** (v - E8M0_BIAS)), RNE, fl)
-
-
 def is_nan(fmt, v):
     return decode(fmt, v)[0][0] == "nan"
 
@@ -288,14 +280,14 @@ def get_elem(buf, eew, idx):
 # ---------------------------------------------------------------------------
 
 
-def block_scales(g, v0, i, j, s, fmt_c, rm, fl):
+def block_scales(g, v0, i, j, s):
+    """Exact combined scale 2^(eA + eB - 254), or NaN if either is 0xFF."""
     R = g.lam * g.sew // 16
-    pa = get_elem(v0, 16, i * R + s)
-    pb = get_elem(v0, 16, j * R + s)
-    sa = e8m0_decode(fmt_c, pa & 0xFF, fl)
-    sb = e8m0_decode(fmt_c, pb >> 8, fl)
-    blk = fp_mul(fmt_c, sa, sb, rm, fl)
-    return blk, is_nan(fmt_c, blk)
+    ea = get_elem(v0, 16, i * R + s) & 0xFF
+    eb = get_elem(v0, 16, j * R + s) >> 8
+    if E8M0_NAN in (ea, eb):
+        return ("nan",), True
+    return ("fin", 0, Fraction(2) ** (ea + eb - 2 * E8M0_BIAS)), False
 
 
 def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
@@ -310,7 +302,7 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
             for s in range(nblk):
                 blk = None
                 if scaled:
-                    blk, nan_out = block_scales(g, v0, i, j, s, fc, rm, fl)
+                    blk, nan_out = block_scales(g, v0, i, j, s)
                     if nan_out:
                         break
                 blo, bhi = s * bsz, min(s * bsz + bsz, g.K) - 1
@@ -325,10 +317,9 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
                             a = dec_flags(fa, get_elem(A, g.eew_a, g.a_idx(i, k)), fl)
                             b = dec_flags(fb, get_elem(B, g.eew_a, g.b_idx(k, j)), fl)
                             S = add(S, mul(a, b, fl), rm, fl)
-                        term = rnd(fc, S, rm, fl)
                         if scaled:
-                            term = fp_mul(fc, blk, term, rm, fl)
-                        acc = fp_add(fc, acc, term, rm, fl)
+                            S = mul(S, blk, fl)
+                        acc = fp_add(fc, acc, rnd(fc, S, rm, fl), rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
 
@@ -345,7 +336,7 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
             acc = get_elem(C, g.sew, ci)
             nan_out = False
             for s in range(nblk):
-                blk, nan_out = block_scales(g, v0, i, j, s, fc, rm, fl)
+                blk, nan_out = block_scales(g, v0, i, j, s)
                 if nan_out:
                     break
                 dot = 0
@@ -354,7 +345,7 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
                     b = sext(get_elem(B, g.eew_a, g.b_idx(k, j)), g.eew_a)
                     dot += a * b
                 xs = ("fin", 1 if dot < 0 else 0, Fraction(abs(dot)))
-                acc = fp_add(fc, acc, fp_mul(fc, blk, rnd(fc, xs, rm, fl), rm, fl), rm, fl)
+                acc = fp_add(fc, acc, rnd(fc, mul(xs, blk, fl), rm, fl), rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
 
@@ -407,15 +398,23 @@ GEOM = {
     (4, 32): dict(lam=2, lmul=8),
     (8, 32): dict(lam=2, lmul=4),
     (8, 64): dict(lam=1, lmul=8),
+    # Unscaled rows only.
+    (1, 16): dict(lam=4, lmul=2),
+    (1, 32): dict(lam=2, lmul=2),
+    (1, 64): dict(lam=1, lmul=4),
+    (2, 32): dict(lam=2, lmul=4),
+    (2, 64): dict(lam=1, lmul=8),
+    (4, 64): dict(lam=1, lmul=4),
 }
 
 # Integer input instruction per W, and its FP-input sibling.
-FP_OP = {2: "vfwmmacc", 4: "vfqmmacc", 8: "vf8wmmacc"}
+FP_OP = {1: "vfmmacc", 2: "vfwmmacc", 4: "vfqmmacc", 8: "vf8wmmacc"}
 INT_OP = {2: "vwmmacc", 4: "vqmmacc", 8: "v8wmmacc"}
 INT_MNEMONIC = {2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
 
 C_FMT = {(16, 0): "fp16", (16, 1): "bf16", (32, 0): "fp32", (64, 0): "fp64"}
-IN_FMT = {(4, 0): "e2m1", (8, 0): "e4m3", (8, 1): "e5m2"}
+IN_FMT = {(4, 0): "e2m1", (8, 0): "e4m3", (8, 1): "e5m2", (16, 0): "fp16", (16, 1): "bf16",
+          (32, 0): "fp32", (32, 1): "fp32", (64, 0): "fp64", (64, 1): "fp64"}
 
 
 def snan(fmt):
@@ -736,7 +735,39 @@ def special_cases(rng):
         build_case(rng, 4, 32, (1, 0, 0), "bs32", RDN, lmul=2, note="partial"),
         build_case(rng, 4, 32, (0, 0, 0), "bs32", RMM, int_inputs=True, lmul=2, note="partial"),
         build_case(rng, 8, 64, (0, 0, 0), "bs16", RNE, int_inputs=True, mutate=nan_scale_b, note="nan-scale-b"),
+        build_case(rng, 4, 32, (1, 1, 0), "bs32", RNE, mutate=double_round_fp, note="exact-scale"),
+        build_case(rng, 2, 16, (0, 0, 0), "bs32", RNE, int_inputs=True, mutate=double_round_int, note="exact-scale"),
     ]
+
+
+def zero_row0(g, A, C):
+    for k in range(g.K):
+        put_elem(A, g.eew_a, g.a_idx(0, k), 0)
+    put_elem(C, g.sew, g.c_idx(0, 0), 0)
+
+
+def double_round_fp(g, A, B, C, v0):
+    """S = 1.25 + 2^-32 (E5M2 1.25*1.0 + 2^-16*2^-16), scale 2^-148, FP32 C.
+    Exact: 2*S units of 2^-149 = 2.5 + tiny -> 3. Rounding S first gives
+    1.25 -> 2.5 units, a tie -> 2."""
+    zero_row0(g, A, C)
+    for k, a, b in ((0, 0x3D, 0x3C), (1, 0x01, 0x01)):
+        put_elem(A, g.eew_a, g.a_idx(0, k), a)
+        put_elem(B, g.eew_a, g.b_idx(k, 0), b)
+    set_scale(g, v0, 0, 0, scale_a=53)
+    set_scale(g, v0, 0, 0, scale_b=53)
+
+
+def double_round_int(g, A, B, C, v0):
+    """dot = 64*32 + 1*1 = 2049, scale 2^-36, FP16 C (subnormal unit 2^-24).
+    Exact: 2049 * 2^-36 = 0.5002 units -> 1. Rounding the dot to FP16 first
+    gives 2048 -> 0.5 units, a tie -> 0."""
+    zero_row0(g, A, C)
+    for k, a, b in ((0, 64, 32), (1, 1, 1)):
+        put_elem(A, g.eew_a, g.a_idx(0, k), a)
+        put_elem(B, g.eew_a, g.b_idx(k, 0), b)
+    set_scale(g, v0, 0, 0, scale_a=109)
+    set_scale(g, v0, 0, 0, scale_b=109)
 
 
 def nan_scale_b(g, A, B, C, v0):
@@ -786,6 +817,41 @@ def gate_cases(rng):
     ]
 
 
+def fp_one(fmt):
+    """Encoding of +1.0."""
+    return pack(fmt, 0, bias(fmt), 0)
+
+
+def group_tie(fa, fb, fc):
+    """C[0][0] = 2^(mbits+1) (ulp 2); row 0 of A is zero except two 1.0
+    products in the first group (k = 0, 1) against column 0 of B."""
+    def mutate(g, A, B, C, v0):
+        for k in range(g.K):
+            put_elem(A, g.eew_a, g.a_idx(0, k), 0)
+        for k in (0, 1):
+            put_elem(A, g.eew_a, g.a_idx(0, k), fp_one(fa))
+            put_elem(B, g.eew_a, g.b_idx(k, 0), fp_one(fb))
+        put_elem(C, g.sew, g.c_idx(0, 0), pack(fc, 0, bias(fc) + FMT[fc][2] + 1, 0))
+    return mutate
+
+
+def fp_row_cases(rng):
+    rows = [(1, 16, [(0, 0)]), (1, 32, [(0, 0)]), (1, 64, [(0, 0)]),
+            (2, 32, OFP8_PAIRS), (2, 64, [(0, 0)]), (4, 64, OFP8_PAIRS),
+            (8, 32, [(0, 0)]), (8, 64, OFP8_PAIRS)]
+    cases, n = [], 0
+    for W, sew, pairs in rows:
+        for alt_a, alt_b in pairs:
+            cases.append(build_case(rng, W, sew, (alt_a, alt_b, 0), "vm1", RMS[n % len(RMS)]))
+            n += 1
+        if W > 1:
+            g_in = sew // W
+            fa, fb = IN_FMT[(g_in, 0)], IN_FMT[(g_in, pairs[-1][1])]
+            cases.append(build_case(rng, W, sew, (0, pairs[-1][1], 0), "vm1", RNE,
+                                    mutate=group_tie(fa, fb, C_FMT[(sew, 0)]), note="group-tie"))
+    return cases
+
+
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
     self_check()
@@ -829,11 +895,13 @@ def main():
         "MX special values and block edge cases (see each case title):\n"
         "  nan-scale: E8M0 0xFF for A row 0, block 1 -> row 0 is the canonical NaN;\n"
         "    block 2 of row 0 would overflow FP16 (OF) but must not be evaluated.\n"
-        "  scale-ovf: E8M0 0xFE (2^127) overflows FP16 -> +inf, OF|NX.\n"
+        "  scale-ovf: E8M0 0xFE (2^127) scales FP16 sums past the range: OF|NX.\n"
         "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0).\n"
-        "  tiny-scale: E8M0 0x00 pairs (2^-254) underflow FP32 to 0, UF|NX.\n"
+        "  tiny-scale: E8M0 0x00 pairs (2^-254) scale FP32 sums to 0, UF|NX.\n"
         "  bf16-ovf: 0xFE x 0xFE = 2^254 overflows BF16.\n"
-        "  partial: K_eff=16 is a single partial BS=32 block.",
+        "  partial: K_eff=16 is a single partial BS=32 block.\n"
+        "  exact-scale: the scale applies to the exact sum before its single\n"
+        "    rounding; rounding first would tie the other way (FP32 and FP16).",
         special_cases(rng))
     files["test_ime_mx_illegal.S"] = (
         "MX illegal encodings; each must raise illegal-instruction and leave C\n"
@@ -844,6 +912,14 @@ def main():
         "Zvvxofp8fp16mm (BS=32) and Zvvxni8fp32mm (BS=16, implies BS=32). Base\n"
         "rows are legal only when implied by an enabled MX extension.",
         gate_cases(rng))
+    files["test_ime_fp_rows.S"] = (
+        "Unscaled (vm=1) FP rows on the SoftFloat-era path: vfmmacc FP16/FP32/FP64,\n"
+        "vfwmmacc FP16/BF16->FP32 and FP32->FP64, vfqmmacc FP16/BF16->FP64,\n"
+        "vf8wmmacc E2M1->FP32 and OFP8->FP64. Random data in all rounding modes,\n"
+        "plus a 'group-tie' case per W>1 row: C[0][0] = 2^(p) (ulp 2) and one\n"
+        "group holds two products of 1.0. The exact group sum 2 is added once\n"
+        "(C + 2); rounding each product into C would tie back to C twice.",
+        fp_row_cases(rng))
     for name, (doc, cases) in files.items():
         write_test(os.path.join(out, name), doc_lines(doc), cases)
         print(f"{name}: {len(cases)} cases")
