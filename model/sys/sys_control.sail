@@ -603,6 +603,7 @@ function reset_sys() -> unit = {
   vcsr[vxsat]      = 0b0;
   vtype[vill]      = 0b1;
   vtype[reserved]  = zeros();
+  vtype[altfmt]    = 0b0;
   vtype[vma]       = 0b0;
   vtype[vta]       = 0b0;
   vtype[vsew]      = 0b000;

@@ -288,7 +288,11 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
   let signed_A = vtype[altfmt_A] == 0b0;
   let signed_B = vtype[altfmt_B] == 0b0;
 
+  // vm=0 of the widening forms is the integer-input MX instruction.
+  if vm == 0b0 & W != 1 then return execute_ime_int_mx(W, vs1, vs2, vd);
+
   if vm != 0b1 |
+     not(currentlyEnabled(Ext_Zvvmm)) |
      not(valid_vtype()) |
      unsigned(vstart) != 0 |
      lambda_value == 0 |
@@ -329,7 +333,7 @@ union clause instruction = IMEVWMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVWMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111001 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm)
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEVWMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "vwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -351,7 +355,7 @@ union clause instruction = IMEVQMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVQMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111010 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm)
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEVQMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "vqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -374,7 +378,7 @@ union clause instruction = IMEV8WMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEV8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111011 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm)
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEV8WMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "v8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -714,7 +718,11 @@ function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregid
   let lambda_nat = ime_lambda_field_to_nat(vtype[vlambda]);
   let LMUL = ime_lmul_value_nat(LMUL_pow);
 
+  // vm=0 (MX) and the rows added with it run on the exact engine.
+  if vm == 0b0 | ime_fp_engine_row(W, SEW) then return execute_ime_fp_engine(W, vm, vs1, vs2, vd);
+
   if vm != 0b1 |
+     not(ime_fp_legacy_row_ok(W, SEW)) |
      not(valid_vtype()) |
      not(valid_fp_op(SEW, rm_3b)) |
      unsigned(vstart) != 0 |
@@ -764,7 +772,7 @@ union clause instruction = IMEVFWMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010101 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm)
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vfwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -779,7 +787,7 @@ union clause instruction = IMEVFQMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010110 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm)
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vfqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -795,7 +803,7 @@ union clause instruction = IMEVF8WMMACCTYPE : (bits(1), vregidx, vregidx, vregid
 
 mapping clause encdec = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010111 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm)
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vf8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)

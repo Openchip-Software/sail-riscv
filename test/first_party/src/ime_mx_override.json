@@ -1,0 +1,100 @@
+{
+  "extensions": {
+    "Zvvmm": {
+      "supported": true
+    },
+    "Zvvmtls": {
+      "supported": true
+    },
+    "Zvvmttls": {
+      "supported": true
+    },
+    "Zvvfmm": {
+      "supported": true
+    },
+    "Zvvxi4bf16mm": {
+      "supported": true
+    },
+    "Zvvxi4fp16mm": {
+      "supported": true
+    },
+    "Zvvxi4fp32mm": {
+      "supported": true
+    },
+    "Zvvxi8bf16mm": {
+      "supported": true
+    },
+    "Zvvxi8fp16mm": {
+      "supported": true
+    },
+    "Zvvxi8fp32mm": {
+      "supported": true
+    },
+    "Zvvxi8fp64mm": {
+      "supported": true
+    },
+    "Zvvxni4bf16mm": {
+      "supported": true
+    },
+    "Zvvxni4fp16mm": {
+      "supported": true
+    },
+    "Zvvxni4fp32mm": {
+      "supported": true
+    },
+    "Zvvxni8bf16mm": {
+      "supported": true
+    },
+    "Zvvxni8fp16mm": {
+      "supported": true
+    },
+    "Zvvxni8fp32mm": {
+      "supported": true
+    },
+    "Zvvxni8fp64mm": {
+      "supported": true
+    },
+    "Zvvxnofp4bf16mm": {
+      "supported": true
+    },
+    "Zvvxnofp4fp16mm": {
+      "supported": true
+    },
+    "Zvvxnofp4fp32mm": {
+      "supported": true
+    },
+    "Zvvxnofp8bf16mm": {
+      "supported": true
+    },
+    "Zvvxnofp8fp16mm": {
+      "supported": true
+    },
+    "Zvvxnofp8fp32mm": {
+      "supported": true
+    },
+    "Zvvxnofp8fp64mm": {
+      "supported": true
+    },
+    "Zvvxofp4bf16mm": {
+      "supported": true
+    },
+    "Zvvxofp4fp16mm": {
+      "supported": true
+    },
+    "Zvvxofp4fp32mm": {
+      "supported": true
+    },
+    "Zvvxofp8bf16mm": {
+      "supported": true
+    },
+    "Zvvxofp8fp16mm": {
+      "supported": true
+    },
+    "Zvvxofp8fp32mm": {
+      "supported": true
+    },
+    "Zvvxofp8fp64mm": {
+      "supported": true
+    }
+  }
+}
