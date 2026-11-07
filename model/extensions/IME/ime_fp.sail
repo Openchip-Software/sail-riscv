@@ -7,7 +7,7 @@
 // (fp_internal) and rounds it to the C accumulator format only at explicit
 // points. This file models that value exactly with unbounded integers:
 //
-//   decode (E2M1/E4M3/E5M2/FP16/BF16/FP32/FP64/E8M0)
+//   decode (E2M1/E4M3/E5M2/FP16/BF16/FP32/FP64)
 //        |
 //        v
 //   ime_fpx = NaN | +-inf | (-1)^sign * mant * 2^exp      (exact)
@@ -43,10 +43,6 @@ let IME_RM_RTZ = 1
 let IME_RM_RDN = 2
 let IME_RM_RUP = 3
 let IME_RM_RMM = 4
-
-// E8M0 scale: exponent-only, bias 127, 0xFF is NaN.
-let IME_E8M0_BIAS = 127
-let IME_E8M0_NAN : bits(8) = 0xFF
 
 // 2^n for n >= 0.
 function ime_pow2(n : int) -> int = shl_int(1, n)
@@ -278,22 +274,6 @@ function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> bit
 function ime_fp_mul(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> bits(64) =
   ime_fp_round(f, ime_fpx_mul(ime_fp_decode_flags(f, a), ime_fp_decode_flags(f, b)), rm)
 
-// int_to_fp of the specification: exact integer rounded to format f.
-function ime_int_to_fp(f : ime_fp_fmt, v : int, rm : int) -> bits(64) =
-  if v < 0
-  then ime_fp_round(f, IME_FPX_FIN(0b1, negate(v), 0), rm)
-  else ime_fp_round(f, IME_FPX_FIN(0b0, v, 0), rm)
-
-// decode_scale of the specification for E8M0: 2^(v - 127) converted to
-// format f, or NaN for 0xFF. The conversion rounds to nearest-even, so an
-// unrepresentable large scale becomes +inf (OF|NX) and a tiny one may flush
-// to zero (UF|NX). Example: 0xFE (2^127) -> FP16 +inf.
-function ime_e8m0_decode(f : ime_fp_fmt, v : bits(8)) -> bits(64) =
-  if v == IME_E8M0_NAN
-  then ime_fp_canonical_nan(f)
-  else ime_fp_round(f, IME_FPX_FIN(0b0, 1, unsigned(v) - IME_E8M0_BIAS), IME_RM_RNE)
-
-function ime_fp_bits_is_nan(f : ime_fp_fmt, v : bits(64)) -> bool = {
-  let (x, _) = ime_fp_decode(f, v);
-  ime_fpx_is_nan(x)
-}
+// Exact value of an integer. Example: -3 -> (-, 3, 0).
+function ime_fpx_of_int(v : int) -> ime_fpx =
+  if v < 0 then IME_FPX_FIN(0b1, negate(v), 0) else IME_FPX_FIN(0b0, v, 0)
