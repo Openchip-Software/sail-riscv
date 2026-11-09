@@ -253,7 +253,7 @@ function execute_ime_int_gemm(
   foreach (j from 0 to (N - 1)) {
     foreach (i from 0 to (M - 1)) {
       let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
-      var acc : int = signed(read_single_element(EEW_C, c_flat, vd));
+      var acc : int = signed(read_single_element_in_group(EEW_C, c_flat, vd, IME_EMUL_C_MAX));
       foreach (k from 0 to (K_eff - 1)) {
         let storage_col = ime_packed_storage_col(k, W);
         let lane = ime_packed_lane(k, W);
@@ -265,7 +265,7 @@ function execute_ime_int_gemm(
         let b_val = ime_packed_subelement_value(b_storage, lane, EEW, signed_B);
         acc = acc + a_val * b_val
       };
-      write_single_element(EEW_C, c_flat, vd, to_bits_unsafe(EEW_C, acc))
+      write_single_element_in_group(EEW_C, c_flat, vd, to_bits_unsafe(EEW_C, acc), IME_EMUL_C_MAX)
     }
   };
 

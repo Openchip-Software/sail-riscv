@@ -131,8 +131,9 @@ function ime_group_size_to_pow(group : nat) -> int =
   else if group == 8 then 3
   else 4
 
+// EMUL_C in {1, 2, 4, 8, 16}.
 function ime_group_size_legal(group : nat) -> bool =
-  group == 1 | group == 2 | group == 4 | group == 8
+  group == 1 | group == 2 | group == 4 | group == 8 | group == 16
 
 // Map a sequential tile element index to the flat architectural element
 // index within a vector register group. The index and elems_per_reg use the

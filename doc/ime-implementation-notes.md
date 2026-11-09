@@ -49,6 +49,7 @@ This is the status note for the initial Sail implementation loop for the draft R
   - The physical storage geometry is the same for all `W`: each matrix row holds `storage_K = lambda * LMUL` `SEW`-bit storage elements along K, addressed via `mat_A_idx`/`mat_B_idx`/`mat_C_idx` (built on `tile_reg_idx`).
   - For `W>1` each `SEW`-bit storage element packs `W` logical input elements of width `EEW = SEW / W`. Logical index `k` maps to storage column `k / W` and lane `k % W` (`ime_packed_storage_col`/`ime_packed_lane`); `ime_packed_subelement_value` extracts the lane in little-endian lane order and sign- or zero-extends it per `altfmt_A/B`. Element `k` occupies bits `[k*EEW + EEW-1 : k*EEW]`, including the sub-byte Int4 (`EEW=4`) nibble packing (even element = lower nibble, odd element = upper nibble).
   - Legality checks: `W in {1,2,4,8}`, `SEW % W == 0`, `EEW = SEW/W` a supported integer logical width (`{4,8,16,32,64}`), and `VL % K_eff == 0`, in addition to the existing `M`/`N`/`N_max`/`EMUL_C`/register-group checks.
+  - `EMUL_C` may be 1, 2, 4, 8 or 16 (`ime_group_size_legal`). `EMUL_C=16` occurs, for example, at `VLEN=256`, `SEW=16`, `lambda=1`; `vd` is then `v0` or `v16`. `read_single_element`/`write_single_element` accept at most 8 registers (max LMUL), so C is accessed through `read_single_element_in_group`/`write_single_element_in_group` with a limit of `IME_EMUL_C_MAX` (16). The FP rows use the same accessors.
   - Accumulation stays modulo `2^SEW`; C read/write indexing stays on `SEW` storage elements.
   - `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) are now enabled and dispatch through this executor.
 - Double-widening integer matrix multiply-accumulate (`vwmmacc.vv`, W=2):
@@ -131,6 +132,13 @@ The initial IME tests live under `test/first_party/src/`:
   - Enables `Zvvmm`, `Zvvmtls`, `Zvvmttls`, and `Zvvfmm` for the targeted first-party tests.
 - `model/unit_tests/test_ime_vtype.sail`
   - Covers lambda encoding helpers, lambda WARL selection, and the addressability of the new high `vtype` fields.
+- `test_ime_emul_c16.S`
+  - `VLEN=256`, `SEW=16`, `LMUL=1`, `lambda=1`: `M=16`, `EMUL_C=16`, C in `v16`-`v31`, column `j` in `v16 + j`.
+  - `vmmacc.vv` and FP16 `vfmmacc.vv` with `VL=16` check all 256 C elements. `vd=v8` raises illegal instruction.
+- `model/unit_tests/test_ime_gemm.sail`
+  - `ime_gemm_geometry` and `vd` alignment at `EMUL_C=16`.
+  - `read_single_element_in_group`/`write_single_element_in_group` with a 16-register limit reach `v24` and `v31` from `vd=v16`.
+  - `execute_ime_int_gemm` and `ime_fp_gemm` across the full 16-register C group.
 
 ## How to run the targeted IME checks
 

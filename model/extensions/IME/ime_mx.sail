@@ -139,17 +139,17 @@ function ime_read_in_signed(EEW_A : int, idx : nat, vs : vregidx) -> int = {
 // Read/write a C element of width EEW_C (16, 32, 64), zero-extended to 64.
 function ime_read_c(EEW_C : int, idx : nat, vd : vregidx) -> bits(64) =
   match EEW_C {
-    16 => zero_extend(64, read_single_element(16, idx, vd)),
-    32 => zero_extend(64, read_single_element(32, idx, vd)),
-    64 => read_single_element(64, idx, vd),
+    16 => zero_extend(64, read_single_element_in_group(16, idx, vd, IME_EMUL_C_MAX)),
+    32 => zero_extend(64, read_single_element_in_group(32, idx, vd, IME_EMUL_C_MAX)),
+    64 => read_single_element_in_group(64, idx, vd, IME_EMUL_C_MAX),
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
 function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit =
   match EEW_C {
-    16 => write_single_element(16, idx, vd, v[15 .. 0]),
-    32 => write_single_element(32, idx, vd, v[31 .. 0]),
-    64 => write_single_element(64, idx, vd, v),
+    16 => write_single_element_in_group(16, idx, vd, v[15 .. 0], IME_EMUL_C_MAX),
+    32 => write_single_element_in_group(32, idx, vd, v[31 .. 0], IME_EMUL_C_MAX),
+    64 => write_single_element_in_group(64, idx, vd, v, IME_EMUL_C_MAX),
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
