@@ -243,7 +243,6 @@ function execute_ime_int_gemm(
   if K_eff == 0 |
      storage_K == 0 |
      M == 0 |
-     N == 0 |
      unsigned(vl) % storage_K != 0 |
      N > N_max |
      not(ime_group_size_legal(EMUL_C)) |
