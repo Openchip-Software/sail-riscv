@@ -1,7 +1,7 @@
 #include "common/encoding.h"
 
 # Test for IME matrix multiply-accumulate with the largest C register group,
-# EMUL_C=16.
+# EMUL_C=16, and for VL=0.
 #
 # Geometry (VLEN=256): SEW=16, LMUL=1, lambda=1 => M=16, K_eff=1,
 # EMUL_C = VLEN / (SEW * lambda^2) = 16. The C tile fills v16-v31 and column
@@ -14,6 +14,8 @@
 #      integer below 2048, so the results are exact and do not depend on frm.
 #   3. vmmacc.vv and vfmmacc.vv with vd=v8 (not a multiple of EMUL_C) raise
 #      illegal instruction.
+#   4. vmmacc.vv, VL=0: no trap, C unchanged. Runs before case 1.
+#   5. vfmmacc.vv FP16, VL=0: no trap. Runs before case 2.
 #
 # vtype 0x10000000000000C8: lambda=1, SEW=16, LMUL=1, ta, ma.
 # vmmacc.vv  v16, v8, v12: funct6=0x38, vm=1, OPIVV => .word 0xe2c40857
@@ -45,6 +47,19 @@ main:
     la a2, int_b
     jal load_ab
 
+    # 4. VL=0.
+    li t0, VTYPE_E16_L1
+    li a1, 0
+    vsetvl t2, a1, t0
+    li s1, 0
+    VMMACC
+    li a4, 8
+    bnez s1, fail
+    jal store_c
+    la a2, int_cinit
+    li a4, 9
+    jal check_c
+
     # 1. VL=16.
     li t0, VTYPE_E16_L1
     li a1, 16
@@ -68,6 +83,15 @@ main:
     la a0, fp_a
     la a2, fp_b
     jal load_ab
+
+    # 5. VL=0.
+    li t0, VTYPE_E16_L1
+    li a1, 0
+    vsetvl t2, a1, t0
+    li s1, 0
+    VFMMACC
+    li a4, 10
+    bnez s1, fail
 
     # 2. VL=16.
     li t0, VTYPE_E16_L1

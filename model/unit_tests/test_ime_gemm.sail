@@ -78,6 +78,16 @@ function test_ime_int_gemm_emul_c16() -> unit = {
     write_single_element_in_group(16, n, v16, to_bits_unsafe(16, n), IME_EMUL_C_MAX)
   };
 
+  // VL=0 retires and leaves C unchanged.
+  ime_test_set_e16_l1(0);
+  match execute_ime_int_gemm(16, 1, 1, 1, true, true, v8, v12, v16) {
+    Retire_Success() => (),
+    _ => assert(false, "VL=0 vmmacc did not retire"),
+  };
+  foreach (n from 0 to 255) {
+    assert(signed(read_single_element_in_group(16, n, v16, IME_EMUL_C_MAX)) == n)
+  };
+
   ime_test_set_e16_l1(16);
   match execute_ime_int_gemm(16, 1, 1, 1, true, true, v8, v12, v16) {
     Retire_Success() => (),
