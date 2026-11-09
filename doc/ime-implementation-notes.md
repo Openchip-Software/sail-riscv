@@ -163,18 +163,19 @@ Latest targeted verification (`ctest -R test_ime_`) completed with all ten IME t
 - The first-party tests use `.word` instruction encodings for the new IME instructions so they do not depend on external assembler mnemonic support.
 - The implementation is still a targeted first loop, not a full conformance suite for all legal lambdas, LMULs, element widths, masking, traps, and exception restart behavior.
 
-
 ## Floating-point vmmacc loop
 
 The current implementation adds unscaled floating-point matrix multiply-accumulate in the same staged style as the integer work. It follows the draft spec's Sail-like starting point for `fp_gemm`, but remains narrower than the full draft matrix.
 
 Initial disclosure for implemented unscaled FP rows:
+
 - Grouping: `G=1`.
 - Partial-sum mode: `psm=0`, exact group sums (see the MX loop).
 - Group rounding: `rnd=frm`.
 - Microscaling (`v0.scale`/`vbs`) and the `altfmt` C format are implemented by the MX loop below, which also executes the rows listed here.
 
 Implemented pieces:
+
 1. Shared decode/execute path for unscaled `vfmmacc.vv`, `vfwmmacc.vv`, and `vfqmmacc.vv` under `Ext_Zvvfmm`:
    - requires `vm=1` and `vstart=0`;
    - rejects unsupported `SEW`, `W`, and alternate input/output format combinations explicitly;
@@ -187,9 +188,11 @@ Implemented pieces:
 5. `vf8wmmacc.vv` rows for OFP4 E2M1→FP32 and OFP8 E4M3/E5M2 (incl. mixed)→FP64.
 
 Still deferred:
+
 - OFP8/OFP4 inputs for `vfmmacc`/`vfwmmacc`/`vfqmmacc` (W<8), non-default C accumulator `altfmt`, round-to-odd group rounding, disclosed `psm=1`, microscaling (`v0.scale`/`vbs`), integer-input FP-accumulate forms, and fine-grained per-format extension gating.
 
 Test requirements for the FP loop:
+
 - First-party assembly tests should continue to use `.word` encodings until assembler mnemonic support exists.
 - FP32 W=1 smoke test: `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`; verify a 4x2 by 2x2 exact matrix multiply-add and confirm inactive C tile columns remain unchanged.
 - Limited-vector-length test: set `VL=lambda*LMUL` so only one C/B column is active; place flag-generating sentinel values in inactive columns and verify they do not affect C or `fflags`.
@@ -199,6 +202,7 @@ Test requirements for the FP loop:
 - Illegal/reserved tests: `vm=0` for `vfmmacc`, nonzero `vstart`, bad `VL` divisibility, misaligned register groups, unsupported alternate formats, `vfqmmacc` with `SEW=8`, and `vf8wmmacc` with `SEW<32`.
 
 Open questions before broadening scope:
+
 1. Whether to add the draft spec's separate C `altfmt` vtype bit now or keep this local model to default C formats until the vtype layout is settled.
 2. Whether `G=1, psm=0, rnd=frm` is the desired architectural disclosure for the initial reference implementation, or whether a fused/`rnd=xct` profile is preferred.
 3. Whether `Zvvfmm` should remain the coarse gate for all default IEEE FP rows in this repo or be replaced with fine-grained draft row extensions before lower-precision rows are enabled.

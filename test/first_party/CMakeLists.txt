@@ -157,18 +157,18 @@ macro(add_ime_test name march xlen override_json_file)
     list(APPEND ime_tests "${name}" "${march}" "${xlen}" "${override_json_file}")
 endmacro()
 
-add_ime_test("test_ime_tile_ls.S" "rv64gcv_zvvmtls" 64 "ime_override.json")
-add_ime_test("test_ime_transpose_tile_ls.S" "rv64gcv_zvvmtls_zvvmttls" 64 "ime_override.json")
+add_ime_test("test_ime_tile_ls.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_transpose_tile_ls.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_vle64_coexist.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_tile_ls_vstart.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_tile_ls_lmul.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_tile_ls_vl.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_tile_ls_v0.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_tile_ls_ld0.S" "rv64gcv" 64 "ime_override.json")
-add_ime_test("test_ime_vmmacc.S" "rv64gcv_zvvmm_zvvmtls" 64 "ime_override.json")
-add_ime_test("test_ime_vwmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
-add_ime_test("test_ime_vqmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
-add_ime_test("test_ime_v8wmmacc.S" "rv64gcv_zvvmm" 64 "ime_override.json")
+add_ime_test("test_ime_vmmacc.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_vwmmacc.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_vqmmacc.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_v8wmmacc.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_vfmmacc.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_vf8wmmacc.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_mx_vfwmmacc.S" "rv64gcv" 64 "ime_mx_override.json")
@@ -234,6 +234,9 @@ foreach(idx RANGE 0 ${ime_test_last} 4)
     add_test(
         NAME "first_party_${arch}_${test_source}"
         COMMAND $<TARGET_FILE:sail_riscv_sim> --enable-experimental-extensions --config ${config} --config-override ${override_config} ${elf}
+    )
+    set_property(TEST "first_party_${arch}_${test_source}"
+        PROPERTY LABELS TestAtBuildTime
     )
 endforeach()
 
