@@ -241,6 +241,7 @@ ime_fp.sail         exact values (unbounded ints) + IEEE rounding with RISC-V fl
 - `ime_mx_override.json` enables all IME and MX extensions; `ime_override.json` stays without MX so the older `vm=0`-illegal checks keep their meaning.
 
 Shortcuts and open spec questions:
+
 - OFP4 → OFP8 accumulator rows (`vfwmmacc` `SEW=8`, `Zvvx[n]ofp4ofp8mm`) are deferred: the spec does not define OFP8 accumulator overflow (E4M3 has no infinity). They raise illegal instruction and have no extension flag.
 - Scales deviate from the specification text on purpose: `read_block_scales` converts `scale_A` and `scale_B` to the C format and rounds their product there, then `fp_scaled_gemm` multiplies the rounded group sum by it. The model instead multiplies the exact group sum by the exact `2^(eA+eB-254)` and rounds once. Scales therefore raise no flags of their own; range effects show up when the scaled sum is rounded.
 - The sign of an exact zero partial sum follows `frm` (`-0` only under RDN, or when all terms are `-0`).
