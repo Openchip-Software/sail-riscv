@@ -26,7 +26,7 @@
 // scales of A row 1, block 2 are in the low byte of v0 element 6.
 
 // FP group size G of the disclosed profile.
-let IME_FP_GROUPING = 1
+type ime_fp_grouping : Int = 1
 
 // Width of one (scale_A, scale_B) E8M0 pair in v0.
 let IME_SCALE_PAIR_BITS = 16
@@ -223,9 +223,9 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
               if int_k_lo <= int_k_hi then {
                 let subdot_lo = ime_div(int_k_lo - step_k_lo, g.W);
                 let subdot_hi = ime_div(int_k_hi - step_k_lo, g.W);
-                foreach (g0 from subdot_lo to subdot_hi by IME_FP_GROUPING) {
+                foreach (g0 from subdot_lo to subdot_hi by sizeof(ime_fp_grouping)) {
                   let k_lo : nat = step_k_lo + g0 * g.W;
-                  let k_hi = ime_nat(k_lo + IME_FP_GROUPING * g.W - 1);
+                  let k_hi = ime_nat(k_lo + sizeof(ime_fp_grouping) * g.W - 1);
                   let S = ime_fp_group_sum(g, i, j, k_lo, k_hi, fmt_A, fmt_B, rm, vs1, vs2);
                   let term = ime_fp_round(fmt_C, ime_fpx_mul(S, blk_scale), rm);
                   acc = ime_fp_add(fmt_C, acc, term, rm)
