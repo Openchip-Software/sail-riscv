@@ -17,10 +17,9 @@ Usage:  ime_mx_gen.py [output_dir]      (default: this script's directory)
 
 import os
 import random
+import struct
 import sys
 from fractions import Fraction
-
-import numpy as np
 
 VLEN = 256
 VLENB = VLEN // 8
@@ -71,7 +70,11 @@ def decode(fmt, v):
         return ("nan",), False
     if e == 0:
         return ("fin", sign, Fraction(m) * Fraction(2) ** (1 - bias(fmt) - mb)), False
-    return ("fin", sign, Fraction((1 << mb) + m) * Fraction(2) ** (e - bias(fmt) - mb)), False
+    return (
+        "fin",
+        sign,
+        Fraction((1 << mb) + m) * Fraction(2) ** (e - bias(fmt) - mb),
+    ), False
 
 
 def mul(a, b, fl):
@@ -111,7 +114,7 @@ def add(a, b, rm, fl):
 
 
 def pack(fmt, sign, biased, frac):
-    width, eb, mb = FMT[fmt]
+    width, _eb, mb = FMT[fmt]
     return (sign << (width - 1)) | (biased << mb) | frac
 
 
@@ -174,7 +177,9 @@ def rnd(fmt, x, rm, fl):
     frac = r - (1 << mb) if normal else r
     if biased >= emax_field:
         fl[0] |= OF | NX
-        to_inf = rm in (RNE, RMM) or (rm == RUP and sign == 0) or (rm == RDN and sign == 1)
+        to_inf = (
+            rm in (RNE, RMM) or (rm == RUP and sign == 0) or (rm == RDN and sign == 1)
+        )
         if to_inf:
             return pack(fmt, sign, emax_field, 0)
         return pack(fmt, sign, emax_field - 1, (1 << mb) - 1)
@@ -199,7 +204,7 @@ def is_nan(fmt, v):
 
 
 def self_check():
-    """Cross-check rnd() against numpy round-to-nearest-even conversions."""
+    """Cross-check rnd() against the round-to-nearest-even conversions of struct."""
     rng = random.Random(1)
     for _ in range(20000):
         mant = rng.randrange(1, 1 << 60)
@@ -208,17 +213,23 @@ def self_check():
         d = float(x)
         if Fraction(d) != x:
             continue
-        for fmt, npt, ut in (("fp16", np.float16, np.uint16), ("fp32", np.float32, np.uint32)):
+        # struct raises OverflowError when the rounded value is infinite.
+        for fmt, packf, unpackf, inf in (
+            ("fp16", "<e", "<H", 0x7C00),
+            ("fp32", "<f", "<I", 0x7F800000),
+        ):
             fl = [0]
             got = rnd(fmt, ("fin", 0, x), RNE, fl)
-            with np.errstate(over="ignore"):
-                want = int(np.array([d], dtype=npt).view(ut)[0])
+            try:
+                want = struct.unpack(unpackf, struct.pack(packf, d))[0]
+            except OverflowError:
+                want = inf
             assert got == want, (fmt, x, hex(got), hex(want))
     for _ in range(5000):
         x = Fraction(rng.randrange(1, 1 << 200), 1 << rng.randrange(0, 400))
         fl = [0]
         got = rnd("fp64", ("fin", 0, x), RNE, fl)
-        want = int(np.array([float(x)]).view(np.uint64)[0])
+        want = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
         assert got == want, (x, hex(got), hex(want))
 
 
@@ -264,7 +275,7 @@ def put_elem(buf, eew, idx, v):
             buf[b] = (buf[b] & 0x0F) | ((v & 0xF) << 4)
         return
     nb = eew // 8
-    buf[idx * nb:(idx + 1) * nb] = v.to_bytes(nb, "little")
+    buf[idx * nb : (idx + 1) * nb] = v.to_bytes(nb, "little")
 
 
 def get_elem(buf, eew, idx):
@@ -272,7 +283,7 @@ def get_elem(buf, eew, idx):
         b = buf[idx // 2]
         return b & 0xF if idx % 2 == 0 else b >> 4
     nb = eew // 8
-    return int.from_bytes(buf[idx * nb:(idx + 1) * nb], "little")
+    return int.from_bytes(buf[idx * nb : (idx + 1) * nb], "little")
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +365,14 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
 # ---------------------------------------------------------------------------
 
 FUNCT6 = {
-    "vfwmmacc": 0x15, "vfqmmacc": 0x16, "vf8wmmacc": 0x17,
-    "vwmmacc": 0x39, "vqmmacc": 0x3a, "v8wmmacc": 0x3b,
-    "vfmmacc": 0x14, "vmmacc": 0x38,
+    "vfwmmacc": 0x15,
+    "vfqmmacc": 0x16,
+    "vf8wmmacc": 0x17,
+    "vwmmacc": 0x39,
+    "vqmmacc": 0x3A,
+    "v8wmmacc": 0x3B,
+    "vfmmacc": 0x14,
+    "vmmacc": 0x38,
 }
 OPFVV, OPIVV = 1, 0
 OP_V = 0x57
@@ -368,7 +384,15 @@ FP_OPS = ("vfwmmacc", "vfqmmacc", "vf8wmmacc", "vfmmacc")
 
 def encode(op, vm, vs1=VS1, vs2=VS2, vd=VD):
     funct3 = OPFVV if op in FP_OPS else OPIVV
-    return (FUNCT6[op] << 26) | (vm << 25) | (vs2 << 20) | (vs1 << 15) | (funct3 << 12) | (vd << 7) | OP_V
+    return (
+        (FUNCT6[op] << 26)
+        | (vm << 25)
+        | (vs2 << 20)
+        | (vs1 << 15)
+        | (funct3 << 12)
+        | (vd << 7)
+        | OP_V
+    )
 
 
 LAMBDA_FIELD = {1: 1, 2: 2, 4: 3, 8: 4, 16: 5, 32: 6, 64: 7}
@@ -393,18 +417,18 @@ def vtype(sew, lmul, lam, bs16=False, alt_a=0, alt_b=0, alt=0):
 # Representative row geometries (VLEN=256), chosen so that K_eff=64 spans
 # two BS=32 blocks and four BS=16 blocks; N = M - 1 leaves one tail column.
 GEOM = {
-    (2, 16): dict(lam=4, lmul=8),
-    (4, 16): dict(lam=4, lmul=4),
-    (4, 32): dict(lam=2, lmul=8),
-    (8, 32): dict(lam=2, lmul=4),
-    (8, 64): dict(lam=1, lmul=8),
+    (2, 16): {"lam": 4, "lmul": 8},
+    (4, 16): {"lam": 4, "lmul": 4},
+    (4, 32): {"lam": 2, "lmul": 8},
+    (8, 32): {"lam": 2, "lmul": 4},
+    (8, 64): {"lam": 1, "lmul": 8},
     # Unscaled rows only.
-    (1, 16): dict(lam=4, lmul=2),
-    (1, 32): dict(lam=2, lmul=2),
-    (1, 64): dict(lam=1, lmul=4),
-    (2, 32): dict(lam=2, lmul=4),
-    (2, 64): dict(lam=1, lmul=8),
-    (4, 64): dict(lam=1, lmul=4),
+    (1, 16): {"lam": 4, "lmul": 2},
+    (1, 32): {"lam": 2, "lmul": 2},
+    (1, 64): {"lam": 1, "lmul": 4},
+    (2, 32): {"lam": 2, "lmul": 4},
+    (2, 64): {"lam": 1, "lmul": 8},
+    (4, 64): {"lam": 1, "lmul": 4},
 }
 
 # Integer input instruction per W, and its FP-input sibling.
@@ -413,12 +437,21 @@ INT_OP = {2: "vwmmacc", 4: "vqmmacc", 8: "v8wmmacc"}
 INT_MNEMONIC = {2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
 
 C_FMT = {(16, 0): "fp16", (16, 1): "bf16", (32, 0): "fp32", (64, 0): "fp64"}
-IN_FMT = {(4, 0): "e2m1", (8, 0): "e4m3", (8, 1): "e5m2", (16, 0): "fp16", (16, 1): "bf16",
-          (32, 0): "fp32", (32, 1): "fp32", (64, 0): "fp64", (64, 1): "fp64"}
+IN_FMT = {
+    (4, 0): "e2m1",
+    (8, 0): "e4m3",
+    (8, 1): "e5m2",
+    (16, 0): "fp16",
+    (16, 1): "bf16",
+    (32, 0): "fp32",
+    (32, 1): "fp32",
+    (64, 0): "fp64",
+    (64, 1): "fp64",
+}
 
 
 def snan(fmt):
-    _, eb, mb = FMT[fmt]
+    _, eb, _mb = FMT[fmt]
     return pack(fmt, 0, (1 << eb) - 1, 1)
 
 
@@ -450,18 +483,46 @@ def rand_int(rng, eew, int8_range):
 
 def rand_c(rng, fmt):
     """A finite C value of moderate magnitude."""
-    x = ("fin", rng.randrange(2), Fraction(rng.randrange(0, 4096), rng.choice([1, 16, 256])))
+    x = (
+        "fin",
+        rng.randrange(2),
+        Fraction(rng.randrange(0, 4096), rng.choice([1, 16, 256])),
+    )
     return rnd(fmt, x, RNE, [0])
 
 
 class Case:
-    def __init__(self, title, op, vm, g, vt, rm, A, B, C, v0, expect_c, expect_flags,
-                 trap=False, insn=None, pre=(), vl=None):
-        self.title, self.op, self.vm, self.g, self.vt, self.rm = title, op, vm, g, vt, rm
+    def __init__(
+        self,
+        title,
+        op,
+        vm,
+        g,
+        vt,
+        rm,
+        A,
+        B,
+        C,
+        v0,
+        expect_c,
+        expect_flags,
+        trap=False,
+        insn=None,
+        pre=(),
+        vl=None,
+    ):
+        self.title, self.op, self.vm, self.g, self.vt, self.rm = (
+            title,
+            op,
+            vm,
+            g,
+            vt,
+            rm,
+        )
         self.A, self.B, self.C, self.v0 = A, B, C, v0
         self.expect_c, self.expect_flags, self.trap = expect_c, expect_flags, trap
         self.insn = insn if insn is not None else encode(op, vm)
-        self.pre = list(pre)          # asm run right before the instruction
+        self.pre = list(pre)  # asm run right before the instruction
         self.vl = g.vl if vl is None else vl
 
 
@@ -474,17 +535,31 @@ def make_data(rng, g, in_fmt, fc, int_inputs=False):
     v0 = bytearray(VLENB)
     for i in range(g.M):
         for k in range(g.K):
-            put_elem(A, g.eew_a, g.a_idx(i, k),
-                     rand_int(rng, g.eew_a, int8_range) if int_inputs else rand_input(rng, in_fmt[0], limit))
+            put_elem(
+                A,
+                g.eew_a,
+                g.a_idx(i, k),
+                rand_int(rng, g.eew_a, int8_range)
+                if int_inputs
+                else rand_input(rng, in_fmt[0], limit),
+            )
     for j in range(g.M):
         for k in range(g.K):
-            put_elem(B, g.eew_a, g.b_idx(k, j),
-                     rand_int(rng, g.eew_a, int8_range) if int_inputs else rand_input(rng, in_fmt[1], limit))
+            put_elem(
+                B,
+                g.eew_a,
+                g.b_idx(k, j),
+                rand_int(rng, g.eew_a, int8_range)
+                if int_inputs
+                else rand_input(rng, in_fmt[1], limit),
+            )
     for i in range(g.M):
         for j in range(g.M):
             # Tail columns hold sNaN: touching them would raise NV.
             if fc in FMT:
-                put_elem(C, g.sew, g.c_idx(i, j), rand_c(rng, fc) if j < g.N else snan(fc))
+                put_elem(
+                    C, g.sew, g.c_idx(i, j), rand_c(rng, fc) if j < g.N else snan(fc)
+                )
     for p in range(VLEN // 16):
         sa = scale_center + rng.randrange(-scale_spread, scale_spread + 1)
         sb = scale_center + rng.randrange(-scale_spread, scale_spread + 1)
@@ -492,9 +567,25 @@ def make_data(rng, g, in_fmt, fc, int_inputs=False):
     return A, B, C, v0
 
 
-def build_case(rng, W, sew, alts=(0, 0, 0), mode="bs32", rm=RNE, int_inputs=False,
-               lam=None, lmul=None, N=None, mutate=None, trap=False, regs=(VS1, VS2, VD),
-               pre=(), vl=None, op=None, note=""):
+def build_case(
+    rng,
+    W,
+    sew,
+    alts=(0, 0, 0),
+    mode="bs32",
+    rm=RNE,
+    int_inputs=False,
+    lam=None,
+    lmul=None,
+    N=None,
+    mutate=None,
+    trap=False,
+    regs=(VS1, VS2, VD),
+    pre=(),
+    vl=None,
+    op=None,
+    note="",
+):
     """One test case. mode: 'vm1', 'bs32', or 'bs16'. A trap case expects an
     illegal-instruction exception and an unchanged C group."""
     alt_a, alt_b, alt = alts
@@ -508,7 +599,10 @@ def build_case(rng, W, sew, alts=(0, 0, 0), mode="bs32", rm=RNE, int_inputs=Fals
         fa = fb = None
         A, B, C, v0 = make_data(rng, g, None, fc, int_inputs=True)
     else:
-        fa, fb = IN_FMT.get((g.eew_a, alt_a), "e4m3"), IN_FMT.get((g.eew_a, alt_b), "e4m3")
+        fa, fb = (
+            IN_FMT.get((g.eew_a, alt_a), "e4m3"),
+            IN_FMT.get((g.eew_a, alt_b), "e4m3"),
+        )
         A, B, C, v0 = make_data(rng, g, (fa, fb), fc)
     if mutate:
         mutate(g, A, B, C, v0)
@@ -536,7 +630,9 @@ def fp_case(rng, W, sew, alt_a, alt_b, alt, mode, rm):
 
 
 def int_case(rng, W, sew, alt, bs16, rm):
-    return build_case(rng, W, sew, (0, 0, alt), "bs16" if bs16 else "bs32", rm, int_inputs=True)
+    return build_case(
+        rng, W, sew, (0, 0, alt), "bs16" if bs16 else "bs32", rm, int_inputs=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -645,14 +741,25 @@ def emit_case(n, c, lines, data):
     lines.append(f"    li a4, {g.emul_c * VLENB}")
     lines.append("    jal check_bytes")
 
-    for name, buf in (("a", c.A), ("b", c.B), ("c", c.C), ("v0", c.v0), ("expect", c.expect_c)):
+    for name, buf in (
+        ("a", c.A),
+        ("b", c.B),
+        ("c", c.C),
+        ("v0", c.v0),
+        ("expect", c.expect_c),
+    ):
         data.append(f"c{n}_{name}:")
         for off in range(0, len(buf), 16):
-            data.append("    .byte " + ", ".join(f"0x{b:02x}" for b in buf[off:off + 16]))
+            data.append(
+                "    .byte " + ", ".join(f"0x{b:02x}" for b in buf[off : off + 16])
+            )
 
 
 def write_test(path, doc, cases):
-    lines, data = [HEADER.format(doc=doc)], [".data", ".balign 64", "c_out:", "    .fill 256, 1, 0"]
+    lines, data = (
+        [HEADER.format(doc=doc)],
+        [".data", ".balign 64", "c_out:", "    .fill 256, 1, 0"],
+    )
     for n, c in enumerate(cases, start=1):
         emit_case(n, c, lines, data)
     lines.append(FOOTER)
@@ -678,7 +785,9 @@ def fp_family(rng, W, sew_rows, modes):
         for alt_a, alt_b in in_alts:
             for alt in c_alts:
                 for mode in modes:
-                    cases.append(fp_case(rng, W, sew, alt_a, alt_b, alt, mode, RMS[n % len(RMS)]))
+                    cases.append(
+                        fp_case(rng, W, sew, alt_a, alt_b, alt, mode, RMS[n % len(RMS)])
+                    )
                     n += 1
     return cases
 
@@ -730,13 +839,48 @@ def special_cases(rng):
         build_case(rng, 2, 16, e5, "bs32", RUP, mutate=scale_ovf, note="scale-ovf"),
         build_case(rng, 2, 16, e5, "vm1", RNE, mutate=inf_times_zero, note="inf*0"),
         build_case(rng, 2, 16, e5, "bs16", RTZ, mutate=inf_times_zero, note="inf*0"),
-        build_case(rng, 4, 32, (0, 1, 0), "bs32", RNE, mutate=tiny_scale, note="tiny-scale"),
-        build_case(rng, 2, 16, (0, 0, 1), "bs32", RNE, mutate=bf16_ovf, note="bf16-ovf"),
+        build_case(
+            rng, 4, 32, (0, 1, 0), "bs32", RNE, mutate=tiny_scale, note="tiny-scale"
+        ),
+        build_case(
+            rng, 2, 16, (0, 0, 1), "bs32", RNE, mutate=bf16_ovf, note="bf16-ovf"
+        ),
         build_case(rng, 4, 32, (1, 0, 0), "bs32", RDN, lmul=2, note="partial"),
-        build_case(rng, 4, 32, (0, 0, 0), "bs32", RMM, int_inputs=True, lmul=2, note="partial"),
-        build_case(rng, 8, 64, (0, 0, 0), "bs16", RNE, int_inputs=True, mutate=nan_scale_b, note="nan-scale-b"),
-        build_case(rng, 4, 32, (1, 1, 0), "bs32", RNE, mutate=double_round_fp, note="exact-scale"),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", RNE, int_inputs=True, mutate=double_round_int, note="exact-scale"),
+        build_case(
+            rng, 4, 32, (0, 0, 0), "bs32", RMM, int_inputs=True, lmul=2, note="partial"
+        ),
+        build_case(
+            rng,
+            8,
+            64,
+            (0, 0, 0),
+            "bs16",
+            RNE,
+            int_inputs=True,
+            mutate=nan_scale_b,
+            note="nan-scale-b",
+        ),
+        build_case(
+            rng,
+            4,
+            32,
+            (1, 1, 0),
+            "bs32",
+            RNE,
+            mutate=double_round_fp,
+            note="exact-scale",
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            (0, 0, 0),
+            "bs32",
+            RNE,
+            int_inputs=True,
+            mutate=double_round_int,
+            note="exact-scale",
+        ),
     ]
 
 
@@ -776,42 +920,153 @@ def nan_scale_b(g, A, B, C, v0):
 
 
 def illegal_cases(rng):
-    T = dict(trap=True)
+    T = {"trap": True}
     return [
-        build_case(rng, 2, 8, (0, 0, 0), "bs32", lam=2, lmul=1, note="SEW=8 OFP8 C deferred", **T),
-        build_case(rng, 4, 16, (0, 0, 0), "bs32", lmul=8, note="control: BS=32, LMUL=8"),
-        build_case(rng, 4, 16, (0, 0, 0), "bs16", lmul=8, note="BS=16 W*LMUL=32>SEW", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", regs=(0, VS2, VD), note="vs1=v0", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", regs=(VS1, 0, VD), note="vs2=v0", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", regs=(VS1, VS2, 0), note="vd=v0", **T),
+        build_case(
+            rng,
+            2,
+            8,
+            (0, 0, 0),
+            "bs32",
+            lam=2,
+            lmul=1,
+            note="SEW=8 OFP8 C deferred",
+            **T,
+        ),
+        build_case(
+            rng, 4, 16, (0, 0, 0), "bs32", lmul=8, note="control: BS=32, LMUL=8"
+        ),
+        build_case(
+            rng, 4, 16, (0, 0, 0), "bs16", lmul=8, note="BS=16 W*LMUL=32>SEW", **T
+        ),
+        build_case(
+            rng, 2, 16, (0, 0, 0), "bs32", regs=(0, VS2, VD), note="vs1=v0", **T
+        ),
+        build_case(
+            rng, 2, 16, (0, 0, 0), "bs32", regs=(VS1, 0, VD), note="vs2=v0", **T
+        ),
+        build_case(
+            rng, 2, 16, (0, 0, 0), "bs32", regs=(VS1, VS2, 0), note="vd=v0", **T
+        ),
         build_case(rng, 4, 16, (1, 0, 0), "bs32", note="OFP4 altfmt_A=1", **T),
         build_case(rng, 4, 32, (0, 0, 1), "bs32", note="FP32 C altfmt=1", **T),
         build_case(rng, 4, 32, (0, 0, 1), "vm1", note="FP32 C altfmt=1", **T),
         build_case(rng, 8, 64, (0, 0, 1), "bs16", note="FP64 C altfmt=1", **T),
-        build_case(rng, 2, 16, (0, 1, 0), "bs32", int_inputs=True, note="MXINT unsigned B", **T),
-        build_case(rng, 2, 32, (0, 0, 0), "bs32", int_inputs=True, lam=2, lmul=1, note="vfwimmacc SEW=32", **T),
-        build_case(rng, 4, 64, (0, 0, 0), "bs32", int_inputs=True, lam=1, lmul=1, note="vfqimmacc SEW=64", **T),
-        build_case(rng, 2, 32, (0, 0, 0), "bs32", lam=2, lmul=1, note="vfwmmacc FP16->FP32 MX", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", pre=["li t1, 1", "csrw vstart, t1"], note="vstart=1", **T),
+        build_case(
+            rng, 2, 16, (0, 1, 0), "bs32", int_inputs=True, note="MXINT unsigned B", **T
+        ),
+        build_case(
+            rng,
+            2,
+            32,
+            (0, 0, 0),
+            "bs32",
+            int_inputs=True,
+            lam=2,
+            lmul=1,
+            note="vfwimmacc SEW=32",
+            **T,
+        ),
+        build_case(
+            rng,
+            4,
+            64,
+            (0, 0, 0),
+            "bs32",
+            int_inputs=True,
+            lam=1,
+            lmul=1,
+            note="vfqimmacc SEW=64",
+            **T,
+        ),
+        build_case(
+            rng,
+            2,
+            32,
+            (0, 0, 0),
+            "bs32",
+            lam=2,
+            lmul=1,
+            note="vfwmmacc FP16->FP32 MX",
+            **T,
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            (0, 0, 0),
+            "bs32",
+            pre=["li t1, 1", "csrw vstart, t1"],
+            note="vstart=1",
+            **T,
+        ),
         build_case(rng, 2, 16, (0, 0, 0), "bs32", vl=95, note="VL not a multiple", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", pre=["csrwi frm, 5"], note="frm=5", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", int_inputs=True, op="vmmacc", lam=2, lmul=1, note="vmmacc vm=0", **T),
-        build_case(rng, 2, 16, (0, 0, 0), "bs32", op="vfmmacc", lam=2, lmul=1, note="vfmmacc vm=0", **T),
+        build_case(
+            rng, 2, 16, (0, 0, 0), "bs32", pre=["csrwi frm, 5"], note="frm=5", **T
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            (0, 0, 0),
+            "bs32",
+            int_inputs=True,
+            op="vmmacc",
+            lam=2,
+            lmul=1,
+            note="vmmacc vm=0",
+            **T,
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            (0, 0, 0),
+            "bs32",
+            op="vfmmacc",
+            lam=2,
+            lmul=1,
+            note="vfmmacc vm=0",
+            **T,
+        ),
     ]
 
 
 def gate_cases(rng):
-    T = dict(trap=True)
+    T = {"trap": True}
     return [
         build_case(rng, 2, 16, (0, 0, 0), "bs32", note="Zvvxofp8fp16mm"),
         build_case(rng, 2, 16, (0, 0, 0), "bs16", note="needs Zvvxnofp8fp16mm", **T),
         build_case(rng, 2, 16, (1, 0, 0), "vm1", note="base implied by MX"),
         build_case(rng, 2, 16, (0, 0, 1), "bs32", note="needs Zvvxofp8bf16mm", **T),
         build_case(rng, 2, 16, (0, 0, 1), "vm1", note="base not implied", **T),
-        build_case(rng, 4, 32, (0, 0, 0), "bs16", int_inputs=True, note="Zvvxni8fp32mm"),
-        build_case(rng, 4, 32, (0, 0, 0), "bs32", int_inputs=True, note="implied Zvvxi8fp32mm"),
-        build_case(rng, 4, 16, (0, 0, 0), "bs32", int_inputs=True, note="needs Zvvxi4fp16mm", **T),
-        build_case(rng, 4, 32, (0, 0, 0), "vm1", int_inputs=True, op="vqmmacc", note="vqmmacc needs Zvvmm", **T),
+        build_case(
+            rng, 4, 32, (0, 0, 0), "bs16", int_inputs=True, note="Zvvxni8fp32mm"
+        ),
+        build_case(
+            rng, 4, 32, (0, 0, 0), "bs32", int_inputs=True, note="implied Zvvxi8fp32mm"
+        ),
+        build_case(
+            rng,
+            4,
+            16,
+            (0, 0, 0),
+            "bs32",
+            int_inputs=True,
+            note="needs Zvvxi4fp16mm",
+            **T,
+        ),
+        build_case(
+            rng,
+            4,
+            32,
+            (0, 0, 0),
+            "vm1",
+            int_inputs=True,
+            op="vqmmacc",
+            note="vqmmacc needs Zvvmm",
+            **T,
+        ),
         build_case(rng, 8, 64, (0, 0, 0), "vm1", note="vf8wmmacc needs Zvvfmm", **T),
         build_case(rng, 4, 32, (0, 0, 0), "vm1", note="vfqmmacc base not implied", **T),
     ]
@@ -825,6 +1080,7 @@ def fp_one(fmt):
 def group_tie(fa, fb, fc):
     """C[0][0] = 2^(mbits+1) (ulp 2); row 0 of A is zero except two 1.0
     products in the first group (k = 0, 1) against column 0 of B."""
+
     def mutate(g, A, B, C, v0):
         for k in range(g.K):
             put_elem(A, g.eew_a, g.a_idx(0, k), 0)
@@ -832,94 +1088,166 @@ def group_tie(fa, fb, fc):
             put_elem(A, g.eew_a, g.a_idx(0, k), fp_one(fa))
             put_elem(B, g.eew_a, g.b_idx(k, 0), fp_one(fb))
         put_elem(C, g.sew, g.c_idx(0, 0), pack(fc, 0, bias(fc) + FMT[fc][2] + 1, 0))
+
     return mutate
 
 
 def fp_row_cases(rng):
-    rows = [(1, 16, [(0, 0)]), (1, 32, [(0, 0)]), (1, 64, [(0, 0)]),
-            (2, 32, OFP8_PAIRS), (2, 64, [(0, 0)]), (4, 64, OFP8_PAIRS),
-            (8, 32, [(0, 0)]), (8, 64, OFP8_PAIRS)]
+    rows = [
+        (1, 16, [(0, 0)]),
+        (1, 32, [(0, 0)]),
+        (1, 64, [(0, 0)]),
+        (2, 32, OFP8_PAIRS),
+        (2, 64, [(0, 0)]),
+        (4, 64, OFP8_PAIRS),
+        (8, 32, [(0, 0)]),
+        (8, 64, OFP8_PAIRS),
+    ]
     cases, n = [], 0
     for W, sew, pairs in rows:
         for alt_a, alt_b in pairs:
-            cases.append(build_case(rng, W, sew, (alt_a, alt_b, 0), "vm1", RMS[n % len(RMS)]))
+            cases.append(
+                build_case(rng, W, sew, (alt_a, alt_b, 0), "vm1", RMS[n % len(RMS)])
+            )
             n += 1
         if W > 1:
             g_in = sew // W
             fa, fb = IN_FMT[(g_in, 0)], IN_FMT[(g_in, pairs[-1][1])]
-            cases.append(build_case(rng, W, sew, (0, pairs[-1][1], 0), "vm1", RNE,
-                                    mutate=group_tie(fa, fb, C_FMT[(sew, 0)]), note="group-tie"))
+            cases.append(
+                build_case(
+                    rng,
+                    W,
+                    sew,
+                    (0, pairs[-1][1], 0),
+                    "vm1",
+                    RNE,
+                    mutate=group_tie(fa, fb, C_FMT[(sew, 0)]),
+                    note="group-tie",
+                )
+            )
     return cases
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
+    out = (
+        sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
+    )
     self_check()
     rng = random.Random(2026)
 
     files = {
         "test_ime_mx_vfwmmacc.S": (
-            "vfwmmacc.vv (W=2), SEW=16: OFP8 E4M3/E5M2 (all A/B pairs) -> FP16/BF16,\n"
-            "unscaled (vm=1) and MX with BS=32 and BS=16. lambda=4, LMUL=8, K_eff=64.",
-            fp_family(rng, 2, [(16, OFP8_PAIRS, [0, 1])], ALL_MODES)),
+            (
+                "vfwmmacc.vv (W=2), SEW=16: OFP8 E4M3/E5M2 (all A/B pairs) -> FP16/BF16,\n"
+                "unscaled (vm=1) and MX with BS=32 and BS=16. lambda=4, LMUL=8, K_eff=64."
+            ),
+            fp_family(rng, 2, [(16, OFP8_PAIRS, [0, 1])], ALL_MODES),
+        ),
         "test_ime_mx_vfqmmacc.S": (
-            "vfqmmacc.vv (W=4): SEW=16 OFP4 E2M1 -> FP16/BF16 (lambda=4, LMUL=4) and\n"
-            "SEW=32 OFP8 (all A/B pairs) -> FP32 (lambda=2, LMUL=8); unscaled (vm=1)\n"
-            "and MX with BS=32 and BS=16. K_eff=64.",
-            fp_family(rng, 4, [(16, [(0, 0)], [0, 1]), (32, OFP8_PAIRS, [0])], ALL_MODES)),
+            (
+                "vfqmmacc.vv (W=4): SEW=16 OFP4 E2M1 -> FP16/BF16 (lambda=4, LMUL=4) and\n"
+                "SEW=32 OFP8 (all A/B pairs) -> FP32 (lambda=2, LMUL=8); unscaled (vm=1)\n"
+                "and MX with BS=32 and BS=16. K_eff=64."
+            ),
+            fp_family(
+                rng, 4, [(16, [(0, 0)], [0, 1]), (32, OFP8_PAIRS, [0])], ALL_MODES
+            ),
+        ),
         "test_ime_mx_vf8wmmacc.S": (
-            "vf8wmmacc.vv (W=8) MX: SEW=32 OFP4 E2M1 -> FP32 (lambda=2, LMUL=4) and\n"
-            "SEW=64 OFP8 (all A/B pairs) -> FP64 (lambda=1, LMUL=8); BS=32 and\n"
-            "BS=16. K_eff=64.",
-            fp_family(rng, 8, [(32, [(0, 0)], [0]), (64, OFP8_PAIRS, [0])], MX_MODES)),
+            (
+                "vf8wmmacc.vv (W=8) MX: SEW=32 OFP4 E2M1 -> FP32 (lambda=2, LMUL=4) and\n"
+                "SEW=64 OFP8 (all A/B pairs) -> FP64 (lambda=1, LMUL=8); BS=32 and\n"
+                "BS=16. K_eff=64."
+            ),
+            fp_family(rng, 8, [(32, [(0, 0)], [0]), (64, OFP8_PAIRS, [0])], MX_MODES),
+        ),
         "test_ime_mx_vfwimmacc.S": (
-            "vfwimmacc.vv (vm=0 of vwmmacc, W=2), SEW=16: MXINT8 -> FP16/BF16,\n"
-            "BS=32 and BS=16. lambda=4, LMUL=8, K_eff=64.",
-            [int_case(rng, 2, 16, alt, bs16, RMS[n % 5])
-             for n, (alt, bs16) in enumerate([(0, False), (0, True), (1, False), (1, True)])]),
+            (
+                "vfwimmacc.vv (vm=0 of vwmmacc, W=2), SEW=16: MXINT8 -> FP16/BF16,\n"
+                "BS=32 and BS=16. lambda=4, LMUL=8, K_eff=64."
+            ),
+            [
+                int_case(rng, 2, 16, alt, bs16, RMS[n % 5])
+                for n, (alt, bs16) in enumerate(
+                    [(0, False), (0, True), (1, False), (1, True)]
+                )
+            ],
+        ),
         "test_ime_mx_vfqimmacc.S": (
-            "vfqimmacc.vv (vm=0 of vqmmacc, W=4): SEW=16 MXINT4 -> FP16/BF16\n"
-            "(lambda=4, LMUL=4) and SEW=32 MXINT8 -> FP32 (lambda=2, LMUL=8);\n"
-            "BS=32 and BS=16. K_eff=64.",
-            [int_case(rng, 4, sew, alt, bs16, RMS[n % 5])
-             for n, (sew, alt, bs16) in enumerate([(16, 0, False), (16, 0, True), (16, 1, False),
-                                                   (16, 1, True), (32, 0, False), (32, 0, True)])]),
+            (
+                "vfqimmacc.vv (vm=0 of vqmmacc, W=4): SEW=16 MXINT4 -> FP16/BF16\n"
+                "(lambda=4, LMUL=4) and SEW=32 MXINT8 -> FP32 (lambda=2, LMUL=8);\n"
+                "BS=32 and BS=16. K_eff=64."
+            ),
+            [
+                int_case(rng, 4, sew, alt, bs16, RMS[n % 5])
+                for n, (sew, alt, bs16) in enumerate(
+                    [
+                        (16, 0, False),
+                        (16, 0, True),
+                        (16, 1, False),
+                        (16, 1, True),
+                        (32, 0, False),
+                        (32, 0, True),
+                    ]
+                )
+            ],
+        ),
         "test_ime_mx_vf8wimmacc.S": (
-            "vf8wimmacc.vv (vm=0 of v8wmmacc, W=8): SEW=32 MXINT4 -> FP32\n"
-            "(lambda=2, LMUL=4) and SEW=64 MXINT8 -> FP64 (lambda=1, LMUL=8);\n"
-            "BS=32 and BS=16. K_eff=64.",
-            [int_case(rng, 8, sew, 0, bs16, RMS[n % 5])
-             for n, (sew, bs16) in enumerate([(32, False), (32, True), (64, False), (64, True)])]),
+            (
+                "vf8wimmacc.vv (vm=0 of v8wmmacc, W=8): SEW=32 MXINT4 -> FP32\n"
+                "(lambda=2, LMUL=4) and SEW=64 MXINT8 -> FP64 (lambda=1, LMUL=8);\n"
+                "BS=32 and BS=16. K_eff=64."
+            ),
+            [
+                int_case(rng, 8, sew, 0, bs16, RMS[n % 5])
+                for n, (sew, bs16) in enumerate(
+                    [(32, False), (32, True), (64, False), (64, True)]
+                )
+            ],
+        ),
     }
     files["test_ime_mx_special.S"] = (
-        "MX special values and block edge cases (see each case title):\n"
-        "  nan-scale: E8M0 0xFF for A row 0, block 1 -> row 0 is the canonical NaN;\n"
-        "    block 2 of row 0 would overflow FP16 (OF) but must not be evaluated.\n"
-        "  scale-ovf: E8M0 0xFE (2^127) scales FP16 sums past the range: OF|NX.\n"
-        "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0).\n"
-        "  tiny-scale: E8M0 0x00 pairs (2^-254) scale FP32 sums to 0, UF|NX.\n"
-        "  bf16-ovf: 0xFE x 0xFE = 2^254 overflows BF16.\n"
-        "  partial: K_eff=16 is a single partial BS=32 block.\n"
-        "  exact-scale: the scale applies to the exact sum before its single\n"
-        "    rounding; rounding first would tie the other way (FP32 and FP16).",
-        special_cases(rng))
+        (
+            "MX special values and block edge cases (see each case title):\n"
+            "  nan-scale: E8M0 0xFF for A row 0, block 1 -> row 0 is the canonical NaN;\n"
+            "    block 2 of row 0 would overflow FP16 (OF) but must not be evaluated.\n"
+            "  scale-ovf: E8M0 0xFE (2^127) scales FP16 sums past the range: OF|NX.\n"
+            "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0).\n"
+            "  tiny-scale: E8M0 0x00 pairs (2^-254) scale FP32 sums to 0, UF|NX.\n"
+            "  bf16-ovf: 0xFE x 0xFE = 2^254 overflows BF16.\n"
+            "  partial: K_eff=16 is a single partial BS=32 block.\n"
+            "  exact-scale: the scale applies to the exact sum before its single\n"
+            "    rounding; rounding first would tie the other way (FP32 and FP16)."
+        ),
+        special_cases(rng),
+    )
     files["test_ime_mx_illegal.S"] = (
-        "MX illegal encodings; each must raise illegal-instruction and leave C\n"
-        "unchanged (see each case title). Legal controls are interleaved.",
-        illegal_cases(rng))
+        (
+            "MX illegal encodings; each must raise illegal-instruction and leave C\n"
+            "unchanged (see each case title). Legal controls are interleaved."
+        ),
+        illegal_cases(rng),
+    )
     files["test_ime_mx_gate.S"] = (
-        "MX extension gating with ime_mx_gate_override.json, which enables only\n"
-        "Zvvxofp8fp16mm (BS=32) and Zvvxni8fp32mm (BS=16, implies BS=32). Base\n"
-        "rows are legal only when implied by an enabled MX extension.",
-        gate_cases(rng))
+        (
+            "MX extension gating with ime_mx_gate_override.json, which enables only\n"
+            "Zvvxofp8fp16mm (BS=32) and Zvvxni8fp32mm (BS=16, implies BS=32). Base\n"
+            "rows are legal only when implied by an enabled MX extension."
+        ),
+        gate_cases(rng),
+    )
     files["test_ime_fp_rows.S"] = (
-        "Unscaled (vm=1) FP rows on the SoftFloat-era path: vfmmacc FP16/FP32/FP64,\n"
-        "vfwmmacc FP16/BF16->FP32 and FP32->FP64, vfqmmacc FP16/BF16->FP64,\n"
-        "vf8wmmacc E2M1->FP32 and OFP8->FP64. Random data in all rounding modes,\n"
-        "plus a 'group-tie' case per W>1 row: C[0][0] = 2^(p) (ulp 2) and one\n"
-        "group holds two products of 1.0. The exact group sum 2 is added once\n"
-        "(C + 2); rounding each product into C would tie back to C twice.",
-        fp_row_cases(rng))
+        (
+            "Unscaled (vm=1) FP rows on the SoftFloat-era path: vfmmacc FP16/FP32/FP64,\n"
+            "vfwmmacc FP16/BF16->FP32 and FP32->FP64, vfqmmacc FP16/BF16->FP64,\n"
+            "vf8wmmacc E2M1->FP32 and OFP8->FP64. Random data in all rounding modes,\n"
+            "plus a 'group-tie' case per W>1 row: C[0][0] = 2^(p) (ulp 2) and one\n"
+            "group holds two products of 1.0. The exact group sum 2 is added once\n"
+            "(C + 2); rounding each product into C would tie back to C twice."
+        ),
+        fp_row_cases(rng),
+    )
     for name, (doc, cases) in files.items():
         write_test(os.path.join(out, name), doc_lines(doc), cases)
         print(f"{name}: {len(cases)} cases")
