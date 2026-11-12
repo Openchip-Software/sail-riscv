@@ -404,6 +404,7 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
   let fmt_B = ime_fp_format_of(g.EEW_A, vtype[altfmt_B]);
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
   ime_fp_gemm(g, fmt_A, fmt_B, fmt_C, scaling, unsigned(rm_3b), vs1, vs2, vd);
+  set_vstart(zeros());
   RETIRE_SUCCESS
 }
 
@@ -427,5 +428,6 @@ function execute_ime_int_mx(W : nat, vs1 : vregidx, vs2 : vregidx, vd : vregidx)
 
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
   ime_int_scaled_gemm(g, fmt_C, unsigned(rm_3b), vs1, vs2, vd);
+  set_vstart(zeros());
   RETIRE_SUCCESS
 }
