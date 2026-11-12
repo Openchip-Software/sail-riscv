@@ -9,6 +9,12 @@ function ime_test_set_e16_l1(vl_value : int) -> unit = {
   vl = to_bits_unsafe(sizeof(vlen_exp) + 1, vl_value)
 }
 
+// vtype for SEW=32, LMUL=4, lambda=1: EMUL_C = VLEN / (SEW * lambda^2) = 8.
+function ime_test_set_e32_l4(vl_value : int) -> unit = {
+  vtype = [Mk_Vtype(zeros()) with vlambda = 0b001, vsew = 0b010, vlmul = 0b010];
+  vl = to_bits_unsafe(sizeof(vlen_exp) + 1, vl_value)
+}
+
 // FP16 encodings of 0.0, 1.0, ..., 15.0, indexed by value.
 let ime_test_fp16_ints : vector(16, bits(16)) = [
   0x4b80, 0x4b00, 0x4a80, 0x4a00, 0x4980, 0x4900, 0x4880, 0x4800,
@@ -31,12 +37,43 @@ function test_ime_gemm_geometry_emul_c16() -> unit = {
   match ime_gemm_geometry(1) {
     Some(g) => {
       assert(g.M == 16 & g.N == 16 & g.EMUL_C == 16 & g.K_eff == 1);
-      // vd must be a multiple of EMUL_C: v0 and v16 only.
+      // vd must be a multiple of EMUL_C: v0 and v16 only. v16 (v16-v31) is
+      // disjoint from vs1=v8 and vs2=v12; v0 (v0-v15) is not, since it
+      // contains both.
       assert(ime_gemm_groups_ok(g, v8, v12, v16));
-      assert(ime_gemm_groups_ok(g, v8, v12, v0));
+      assert(not(ime_gemm_groups_ok(g, v8, v12, v0)));
       assert(not(ime_gemm_groups_ok(g, v12, v0, v8)));
     },
     None() => assert(false, "EMUL_C=16 geometry rejected"),
+  };
+
+  vtype = saved_vtype;
+  vl = saved_vl;
+}
+
+$[test]
+function test_ime_gemm_groups_overlap_lmul4() -> unit = {
+  let saved_vtype = vtype;
+  let saved_vl = vl;
+  let v0 = encdec_vreg(0b00000);
+  let v4 = encdec_vreg(0b00100);
+  let v16 = encdec_vreg(0b10000);
+  let v20 = encdec_vreg(0b10100);
+
+  // SEW=32, LMUL=4, lambda=1: EMUL_C = 8, so vd=v16 spans v16-v23.
+  ime_test_set_e32_l4(4);
+  match ime_gemm_geometry(1) {
+    Some(g) => {
+      assert(g.LMUL == 4 & g.EMUL_C == 8);
+      // vs1=v0 (v0-v3) and vs2=v4 (v4-v7) are both disjoint from vd=v16
+      // (v16-v23).
+      assert(ime_gemm_groups_ok(g, v0, v4, v16));
+      // vs1=v20 (v20-v23) is a four-register group inside vd's v16-v23
+      // range: partial overlap, not the shared-base case that S:561-564
+      // allows.
+      assert(not(ime_gemm_groups_ok(g, v20, v4, v16)));
+    },
+    None() => assert(false, "SEW=32 LMUL=4 geometry rejected"),
   };
 
   vtype = saved_vtype;

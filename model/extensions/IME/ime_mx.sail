@@ -368,11 +368,15 @@ function ime_mx_operands_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd 
   not(vtype[vbs] == 0b1 & g.W * g.LMUL > g.EEW_C) &
   vs1 != zvreg & vs2 != zvreg & vd != zvreg
 
-// Register groups: vs1/vs2 aligned to LMUL, vd aligned to EMUL_C.
+// Register groups: vs1/vs2 aligned to LMUL, vd aligned to EMUL_C. The C
+// accumulator group shall not overlap either input group, regardless of VL
+// (spec S:551-559); the two input groups may overlap each other (S:561-564).
 function ime_gemm_groups_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> bool =
   valid_reg_group(vs1, ime_group_size_to_pow(g.LMUL)) &
   valid_reg_group(vs2, ime_group_size_to_pow(g.LMUL)) &
-  valid_reg_group(vd, ime_group_size_to_pow(g.EMUL_C))
+  valid_reg_group(vd, ime_group_size_to_pow(g.EMUL_C)) &
+  ime_reg_groups_disjoint(vd, g.EMUL_C, vs1, g.LMUL) &
+  ime_reg_groups_disjoint(vd, g.EMUL_C, vs2, g.LMUL)
 
 // ---------------------------------------------------------------------------
 // Execution entry points.

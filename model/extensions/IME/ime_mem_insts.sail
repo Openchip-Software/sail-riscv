@@ -246,7 +246,11 @@ function execute_ime_int_gemm(
      unsigned(vl) % storage_K != 0 |
      N > N_max |
      not(ime_group_size_legal(EMUL_C)) |
-     not(valid_reg_group(vd, EMUL_C_pow))
+     not(valid_reg_group(vd, EMUL_C_pow)) |
+     // The C accumulator group shall not overlap either input group,
+     // regardless of VL, including VL = 0 (spec S:551-559).
+     not(ime_reg_groups_disjoint(vd, EMUL_C, vs1, LMUL)) |
+     not(ime_reg_groups_disjoint(vd, EMUL_C, vs2, LMUL))
   then return Illegal_Instruction();
 
   foreach (j from 0 to (N - 1)) {
