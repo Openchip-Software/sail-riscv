@@ -16,16 +16,24 @@
 #      illegal instruction.
 #   4. vmmacc.vv, VL=0: no trap, C unchanged. Runs before case 1.
 #   5. vfmmacc.vv FP16, VL=0: no trap. Runs before case 2.
+#   6. vmmacc.vv v16, v20, v12: vs1=v20 is a one-register group inside vd's
+#      v16-v31 EMUL_C=16 range. Raises illegal instruction at VL=16 and at
+#      VL=0 (the destination-overlap check applies regardless of VL).
+#   7. vfmmacc.vv FP16 with the same overlapping layout raises illegal
+#      instruction.
 #
 # vtype 0x10000000000000C8: lambda=1, SEW=16, LMUL=1, ta, ma.
 # vmmacc.vv  v16, v8, v12: funct6=0x38, vm=1, OPIVV => .word 0xe2c40857
 # vfmmacc.vv v16, v8, v12: funct6=0x14, vm=1, OPFVV => .word 0x52c41857
 # The vd=v8 forms are 0xe2c40457 and 0x52c41457.
+# The vs1=v20 forms (vd=v16, vs2=v12) are 0xe2ca0857 and 0x52ca1857.
 
 #define VMMACC .word 0xe2c40857
 #define VFMMACC .word 0x52c41857
 #define VMMACC_VD8 .word 0xe2c40457
 #define VFMMACC_VD8 .word 0x52c41457
+#define VMMACC_VS1_20 .word 0xe2ca0857
+#define VFMMACC_VS1_20 .word 0x52ca1857
 #define VTYPE_E16_L1 0x10000000000000C8
 
 .global main
@@ -117,6 +125,32 @@ main:
     li s1, 0
     VFMMACC_VD8
     li a4, 7
+    bne s1, t1, fail
+
+    # =====================================================================
+    # 6-7. vs1=v20 is a one-register group inside vd's v16-v31 EMUL_C=16
+    # range: partial overlap, which S:551-559 forbids regardless of VL.
+    # =====================================================================
+    li t0, VTYPE_E16_L1
+    li a1, 16
+    vsetvl t2, a1, t0
+    li s1, 0
+    VMMACC_VS1_20
+    li a4, 11
+    bne s1, t1, fail
+
+    li a1, 0
+    vsetvl t2, a1, t0
+    li s1, 0
+    VMMACC_VS1_20
+    li a4, 12
+    bne s1, t1, fail
+
+    li a1, 16
+    vsetvl t2, a1, t0
+    li s1, 0
+    VFMMACC_VS1_20
+    li a4, 13
     bne s1, t1, fail
 
     li a0, 0
