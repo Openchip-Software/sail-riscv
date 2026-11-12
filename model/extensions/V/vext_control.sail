@@ -57,6 +57,11 @@ function read_single_element_in_group(EEW, index, vrid, max_regs) = {
   let reg_in_group = index / elem_per_reg;
   assert(reg_in_group < max_regs);
 
+  // The group must not wrap past v31: vregidx addition below wraps modulo
+  // 32, which would otherwise silently alias into the start of the
+  // register file.
+  assert(unsigned(vregidx_bits(vrid)) + reg_in_group < 32);
+
   // Get the actual register in the group that we need to write, and the index into it.
   let vrid = vrid + reg_in_group;
   let index = index % elem_per_reg;
@@ -104,6 +109,11 @@ function write_single_element_in_group(EEW, index, vrid, value, max_regs) = {
   // Register in group, in [0, max_regs).
   let reg_in_group = index / elem_per_reg;
   assert(reg_in_group < max_regs);
+
+  // The group must not wrap past v31: vregidx addition below wraps modulo
+  // 32, which would otherwise silently alias into the start of the
+  // register file.
+  assert(unsigned(vregidx_bits(vrid)) + reg_in_group < 32);
 
   // Get the actual register in the group that we need to write, and the index into it.
   let vrid = vrid + reg_in_group;
