@@ -412,7 +412,79 @@ enum clause extension = Ext_Zvfhmin
 mapping clause extensionName = Ext_Zvfhmin <-> "zvfhmin"
 function clause hartSupports(Ext_Zvfhmin) = config extensions.Zvfhmin.supported
 
-// Integrated Matrix Extension (draft Zvvm family)
+// Integrated Matrix Extension (draft Zvvm family): the family-level
+// extensions (Zvvmm, Zvvfmm, Zvvmtls, Zvvmttls), the individual
+// computational extensions (tbl-extensions), and the microscaling
+// subextensions Zvvx*/Zvvxn* (tbl-mx-extensions), sorted alphabetically.
+enum clause extension = Ext_Zvvbf16fp32mm
+mapping clause extensionName = Ext_Zvvbf16fp32mm <-> "zvvbf16fp32mm"
+function clause hartSupports(Ext_Zvvbf16fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvbf16fp32mm.supported
+enum clause extension = Ext_Zvvbf16fp64mm
+mapping clause extensionName = Ext_Zvvbf16fp64mm <-> "zvvbf16fp64mm"
+function clause hartSupports(Ext_Zvvbf16fp64mm) = sys_enable_experimental_extensions() & config extensions.Zvvbf16fp64mm.supported
+enum clause extension = Ext_Zvvbf16mm
+mapping clause extensionName = Ext_Zvvbf16mm <-> "zvvbf16mm"
+function clause hartSupports(Ext_Zvvbf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvbf16mm.supported
+enum clause extension = Ext_Zvvfmm
+mapping clause extensionName = Ext_Zvvfmm <-> "zvvfmm"
+function clause hartSupports(Ext_Zvvfmm) = sys_enable_experimental_extensions() & config extensions.Zvvfmm.supported
+enum clause extension = Ext_Zvvfp16fp32mm
+mapping clause extensionName = Ext_Zvvfp16fp32mm <-> "zvvfp16fp32mm"
+function clause hartSupports(Ext_Zvvfp16fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp16fp32mm.supported
+enum clause extension = Ext_Zvvfp16fp64mm
+mapping clause extensionName = Ext_Zvvfp16fp64mm <-> "zvvfp16fp64mm"
+function clause hartSupports(Ext_Zvvfp16fp64mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp16fp64mm.supported
+enum clause extension = Ext_Zvvfp16mm
+mapping clause extensionName = Ext_Zvvfp16mm <-> "zvvfp16mm"
+function clause hartSupports(Ext_Zvvfp16mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp16mm.supported
+enum clause extension = Ext_Zvvfp32fp64mm
+mapping clause extensionName = Ext_Zvvfp32fp64mm <-> "zvvfp32fp64mm"
+function clause hartSupports(Ext_Zvvfp32fp64mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp32fp64mm.supported
+enum clause extension = Ext_Zvvfp32mm
+mapping clause extensionName = Ext_Zvvfp32mm <-> "zvvfp32mm"
+function clause hartSupports(Ext_Zvvfp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp32mm.supported
+enum clause extension = Ext_Zvvfp64mm
+mapping clause extensionName = Ext_Zvvfp64mm <-> "zvvfp64mm"
+function clause hartSupports(Ext_Zvvfp64mm) = sys_enable_experimental_extensions() & config extensions.Zvvfp64mm.supported
+enum clause extension = Ext_Zvvi16i32mm
+mapping clause extensionName = Ext_Zvvi16i32mm <-> "zvvi16i32mm"
+function clause hartSupports(Ext_Zvvi16i32mm) = sys_enable_experimental_extensions() & config extensions.Zvvi16i32mm.supported
+enum clause extension = Ext_Zvvi16i64mm
+mapping clause extensionName = Ext_Zvvi16i64mm <-> "zvvi16i64mm"
+function clause hartSupports(Ext_Zvvi16i64mm) = sys_enable_experimental_extensions() & config extensions.Zvvi16i64mm.supported
+enum clause extension = Ext_Zvvi16mm
+mapping clause extensionName = Ext_Zvvi16mm <-> "zvvi16mm"
+function clause hartSupports(Ext_Zvvi16mm) = sys_enable_experimental_extensions() & config extensions.Zvvi16mm.supported
+enum clause extension = Ext_Zvvi32i64mm
+mapping clause extensionName = Ext_Zvvi32i64mm <-> "zvvi32i64mm"
+function clause hartSupports(Ext_Zvvi32i64mm) = sys_enable_experimental_extensions() & config extensions.Zvvi32i64mm.supported
+enum clause extension = Ext_Zvvi32mm
+mapping clause extensionName = Ext_Zvvi32mm <-> "zvvi32mm"
+function clause hartSupports(Ext_Zvvi32mm) = sys_enable_experimental_extensions() & config extensions.Zvvi32mm.supported
+enum clause extension = Ext_Zvvi4i16mm
+mapping clause extensionName = Ext_Zvvi4i16mm <-> "zvvi4i16mm"
+function clause hartSupports(Ext_Zvvi4i16mm) = sys_enable_experimental_extensions() & config extensions.Zvvi4i16mm.supported
+enum clause extension = Ext_Zvvi4i32mm
+mapping clause extensionName = Ext_Zvvi4i32mm <-> "zvvi4i32mm"
+function clause hartSupports(Ext_Zvvi4i32mm) = sys_enable_experimental_extensions() & config extensions.Zvvi4i32mm.supported
+enum clause extension = Ext_Zvvi4i8mm
+mapping clause extensionName = Ext_Zvvi4i8mm <-> "zvvi4i8mm"
+function clause hartSupports(Ext_Zvvi4i8mm) = sys_enable_experimental_extensions() & config extensions.Zvvi4i8mm.supported
+enum clause extension = Ext_Zvvi64mm
+mapping clause extensionName = Ext_Zvvi64mm <-> "zvvi64mm"
+function clause hartSupports(Ext_Zvvi64mm) = sys_enable_experimental_extensions() & config extensions.Zvvi64mm.supported
+enum clause extension = Ext_Zvvi8i16mm
+mapping clause extensionName = Ext_Zvvi8i16mm <-> "zvvi8i16mm"
+function clause hartSupports(Ext_Zvvi8i16mm) = sys_enable_experimental_extensions() & config extensions.Zvvi8i16mm.supported
+enum clause extension = Ext_Zvvi8i32mm
+mapping clause extensionName = Ext_Zvvi8i32mm <-> "zvvi8i32mm"
+function clause hartSupports(Ext_Zvvi8i32mm) = sys_enable_experimental_extensions() & config extensions.Zvvi8i32mm.supported
+enum clause extension = Ext_Zvvi8i64mm
+mapping clause extensionName = Ext_Zvvi8i64mm <-> "zvvi8i64mm"
+function clause hartSupports(Ext_Zvvi8i64mm) = sys_enable_experimental_extensions() & config extensions.Zvvi8i64mm.supported
+enum clause extension = Ext_Zvvi8mm
+mapping clause extensionName = Ext_Zvvi8mm <-> "zvvi8mm"
+function clause hartSupports(Ext_Zvvi8mm) = sys_enable_experimental_extensions() & config extensions.Zvvi8mm.supported
 enum clause extension = Ext_Zvvmm
 mapping clause extensionName = Ext_Zvvmm <-> "zvvmm"
 function clause hartSupports(Ext_Zvvmm) = sys_enable_experimental_extensions() & config extensions.Zvvmm.supported
@@ -422,11 +494,33 @@ function clause hartSupports(Ext_Zvvmtls) = sys_enable_experimental_extensions()
 enum clause extension = Ext_Zvvmttls
 mapping clause extensionName = Ext_Zvvmttls <-> "zvvmttls"
 function clause hartSupports(Ext_Zvvmttls) = sys_enable_experimental_extensions() & config extensions.Zvvmttls.supported
-enum clause extension = Ext_Zvvfmm
-mapping clause extensionName = Ext_Zvvfmm <-> "zvvfmm"
-function clause hartSupports(Ext_Zvvfmm) = sys_enable_experimental_extensions() & config extensions.Zvvfmm.supported
-// Microscaling (MX) subextensions: Zvvx* (block size 32) and Zvvxn* (block
-// size 16). Zvvxn* implies the matching Zvvx*.
+enum clause extension = Ext_Zvvofp4bf16mm
+mapping clause extensionName = Ext_Zvvofp4bf16mm <-> "zvvofp4bf16mm"
+function clause hartSupports(Ext_Zvvofp4bf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp4bf16mm.supported
+enum clause extension = Ext_Zvvofp4fp16mm
+mapping clause extensionName = Ext_Zvvofp4fp16mm <-> "zvvofp4fp16mm"
+function clause hartSupports(Ext_Zvvofp4fp16mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp4fp16mm.supported
+enum clause extension = Ext_Zvvofp4fp32mm
+mapping clause extensionName = Ext_Zvvofp4fp32mm <-> "zvvofp4fp32mm"
+function clause hartSupports(Ext_Zvvofp4fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp4fp32mm.supported
+enum clause extension = Ext_Zvvofp4ofp8mm
+mapping clause extensionName = Ext_Zvvofp4ofp8mm <-> "zvvofp4ofp8mm"
+function clause hartSupports(Ext_Zvvofp4ofp8mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp4ofp8mm.supported
+enum clause extension = Ext_Zvvofp8bf16mm
+mapping clause extensionName = Ext_Zvvofp8bf16mm <-> "zvvofp8bf16mm"
+function clause hartSupports(Ext_Zvvofp8bf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp8bf16mm.supported
+enum clause extension = Ext_Zvvofp8fp16mm
+mapping clause extensionName = Ext_Zvvofp8fp16mm <-> "zvvofp8fp16mm"
+function clause hartSupports(Ext_Zvvofp8fp16mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp8fp16mm.supported
+enum clause extension = Ext_Zvvofp8fp32mm
+mapping clause extensionName = Ext_Zvvofp8fp32mm <-> "zvvofp8fp32mm"
+function clause hartSupports(Ext_Zvvofp8fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp8fp32mm.supported
+enum clause extension = Ext_Zvvofp8fp64mm
+mapping clause extensionName = Ext_Zvvofp8fp64mm <-> "zvvofp8fp64mm"
+function clause hartSupports(Ext_Zvvofp8fp64mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp8fp64mm.supported
+enum clause extension = Ext_Zvvofp8mm
+mapping clause extensionName = Ext_Zvvofp8mm <-> "zvvofp8mm"
+function clause hartSupports(Ext_Zvvofp8mm) = sys_enable_experimental_extensions() & config extensions.Zvvofp8mm.supported
 enum clause extension = Ext_Zvvxi4bf16mm
 mapping clause extensionName = Ext_Zvvxi4bf16mm <-> "zvvxi4bf16mm"
 function clause hartSupports(Ext_Zvvxi4bf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvxi4bf16mm.supported
@@ -478,6 +572,9 @@ function clause hartSupports(Ext_Zvvxnofp4fp16mm) = sys_enable_experimental_exte
 enum clause extension = Ext_Zvvxnofp4fp32mm
 mapping clause extensionName = Ext_Zvvxnofp4fp32mm <-> "zvvxnofp4fp32mm"
 function clause hartSupports(Ext_Zvvxnofp4fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvxnofp4fp32mm.supported
+enum clause extension = Ext_Zvvxnofp4ofp8mm
+mapping clause extensionName = Ext_Zvvxnofp4ofp8mm <-> "zvvxnofp4ofp8mm"
+function clause hartSupports(Ext_Zvvxnofp4ofp8mm) = sys_enable_experimental_extensions() & config extensions.Zvvxnofp4ofp8mm.supported
 enum clause extension = Ext_Zvvxnofp8bf16mm
 mapping clause extensionName = Ext_Zvvxnofp8bf16mm <-> "zvvxnofp8bf16mm"
 function clause hartSupports(Ext_Zvvxnofp8bf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvxnofp8bf16mm.supported
@@ -499,6 +596,9 @@ function clause hartSupports(Ext_Zvvxofp4fp16mm) = sys_enable_experimental_exten
 enum clause extension = Ext_Zvvxofp4fp32mm
 mapping clause extensionName = Ext_Zvvxofp4fp32mm <-> "zvvxofp4fp32mm"
 function clause hartSupports(Ext_Zvvxofp4fp32mm) = sys_enable_experimental_extensions() & config extensions.Zvvxofp4fp32mm.supported
+enum clause extension = Ext_Zvvxofp4ofp8mm
+mapping clause extensionName = Ext_Zvvxofp4ofp8mm <-> "zvvxofp4ofp8mm"
+function clause hartSupports(Ext_Zvvxofp4ofp8mm) = sys_enable_experimental_extensions() & config extensions.Zvvxofp4ofp8mm.supported
 enum clause extension = Ext_Zvvxofp8bf16mm
 mapping clause extensionName = Ext_Zvvxofp8bf16mm <-> "zvvxofp8bf16mm"
 function clause hartSupports(Ext_Zvvxofp8bf16mm) = sys_enable_experimental_extensions() & config extensions.Zvvxofp8bf16mm.supported
@@ -1000,11 +1100,42 @@ let extensions_ordered_for_isa_string = [
   Ext_Zvl512b,
   Ext_Zvl1024b,
 
-  // Zvvm
+  // Zvvm, sorted alphabetically (family, individual and microscaling extensions)
+  Ext_Zvvbf16fp32mm,
+  Ext_Zvvbf16fp64mm,
+  Ext_Zvvbf16mm,
   Ext_Zvvfmm,
+  Ext_Zvvfp16fp32mm,
+  Ext_Zvvfp16fp64mm,
+  Ext_Zvvfp16mm,
+  Ext_Zvvfp32fp64mm,
+  Ext_Zvvfp32mm,
+  Ext_Zvvfp64mm,
+  Ext_Zvvi16i32mm,
+  Ext_Zvvi16i64mm,
+  Ext_Zvvi16mm,
+  Ext_Zvvi32i64mm,
+  Ext_Zvvi32mm,
+  Ext_Zvvi4i16mm,
+  Ext_Zvvi4i32mm,
+  Ext_Zvvi4i8mm,
+  Ext_Zvvi64mm,
+  Ext_Zvvi8i16mm,
+  Ext_Zvvi8i32mm,
+  Ext_Zvvi8i64mm,
+  Ext_Zvvi8mm,
   Ext_Zvvmm,
   Ext_Zvvmtls,
   Ext_Zvvmttls,
+  Ext_Zvvofp4bf16mm,
+  Ext_Zvvofp4fp16mm,
+  Ext_Zvvofp4fp32mm,
+  Ext_Zvvofp4ofp8mm,
+  Ext_Zvvofp8bf16mm,
+  Ext_Zvvofp8fp16mm,
+  Ext_Zvvofp8fp32mm,
+  Ext_Zvvofp8fp64mm,
+  Ext_Zvvofp8mm,
   Ext_Zvvxi4bf16mm,
   Ext_Zvvxi4fp16mm,
   Ext_Zvvxi4fp32mm,
@@ -1022,6 +1153,7 @@ let extensions_ordered_for_isa_string = [
   Ext_Zvvxnofp4bf16mm,
   Ext_Zvvxnofp4fp16mm,
   Ext_Zvvxnofp4fp32mm,
+  Ext_Zvvxnofp4ofp8mm,
   Ext_Zvvxnofp8bf16mm,
   Ext_Zvvxnofp8fp16mm,
   Ext_Zvvxnofp8fp32mm,
@@ -1029,6 +1161,7 @@ let extensions_ordered_for_isa_string = [
   Ext_Zvvxofp4bf16mm,
   Ext_Zvvxofp4fp16mm,
   Ext_Zvvxofp4fp32mm,
+  Ext_Zvvxofp4ofp8mm,
   Ext_Zvvxofp8bf16mm,
   Ext_Zvvxofp8fp16mm,
   Ext_Zvvxofp8fp32mm,

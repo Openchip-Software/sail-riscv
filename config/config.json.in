@@ -980,6 +980,105 @@
     "Zvfhmin": {
       "supported": true
     },
+    "Zvbb": {
+      "supported": true
+    },
+    "Zvbc": {
+      "supported": @CONFIG_ELEN_IS_64@
+    },
+    "Zvkb": {
+      "supported": false
+    },
+    "Zvkg": {
+      "supported": true
+    },
+    "Zvkned": {
+      "supported": true
+    },
+    "Zvknha": {
+      "supported": true
+    },
+    "Zvknhb": {
+      "supported": @CONFIG_ELEN_IS_64@
+    },
+    "Zvksed": {
+      "supported": true
+    },
+    "Zvksh": {
+      "supported": true
+    },
+    "Zvkt": {
+      "supported": true
+    },
+    "Zvvbf16fp32mm": {
+      "supported": false
+    },
+    "Zvvbf16fp64mm": {
+      "supported": false
+    },
+    "Zvvbf16mm": {
+      "supported": false
+    },
+    "Zvvfmm": {
+      "supported": false
+    },
+    "Zvvfp16fp32mm": {
+      "supported": false
+    },
+    "Zvvfp16fp64mm": {
+      "supported": false
+    },
+    "Zvvfp16mm": {
+      "supported": false
+    },
+    "Zvvfp32fp64mm": {
+      "supported": false
+    },
+    "Zvvfp32mm": {
+      "supported": false
+    },
+    "Zvvfp64mm": {
+      "supported": false
+    },
+    "Zvvi16i32mm": {
+      "supported": false
+    },
+    "Zvvi16i64mm": {
+      "supported": false
+    },
+    "Zvvi16mm": {
+      "supported": false
+    },
+    "Zvvi32i64mm": {
+      "supported": false
+    },
+    "Zvvi32mm": {
+      "supported": false
+    },
+    "Zvvi4i16mm": {
+      "supported": false
+    },
+    "Zvvi4i32mm": {
+      "supported": false
+    },
+    "Zvvi4i8mm": {
+      "supported": false
+    },
+    "Zvvi64mm": {
+      "supported": false
+    },
+    "Zvvi8i16mm": {
+      "supported": false
+    },
+    "Zvvi8i32mm": {
+      "supported": false
+    },
+    "Zvvi8i64mm": {
+      "supported": false
+    },
+    "Zvvi8mm": {
+      "supported": false
+    },
     "Zvvmm": {
       "supported": false
     },
@@ -989,7 +1088,31 @@
     "Zvvmttls": {
       "supported": false
     },
-    "Zvvfmm": {
+    "Zvvofp4bf16mm": {
+      "supported": false
+    },
+    "Zvvofp4fp16mm": {
+      "supported": false
+    },
+    "Zvvofp4fp32mm": {
+      "supported": false
+    },
+    "Zvvofp4ofp8mm": {
+      "supported": false
+    },
+    "Zvvofp8bf16mm": {
+      "supported": false
+    },
+    "Zvvofp8fp16mm": {
+      "supported": false
+    },
+    "Zvvofp8fp32mm": {
+      "supported": false
+    },
+    "Zvvofp8fp64mm": {
+      "supported": false
+    },
+    "Zvvofp8mm": {
       "supported": false
     },
     "Zvvxi4bf16mm": {
@@ -1043,6 +1166,9 @@
     "Zvvxnofp4fp32mm": {
       "supported": false
     },
+    "Zvvxnofp4ofp8mm": {
+      "supported": false
+    },
     "Zvvxnofp8bf16mm": {
       "supported": false
     },
@@ -1064,6 +1190,9 @@
     "Zvvxofp4fp32mm": {
       "supported": false
     },
+    "Zvvxofp4ofp8mm": {
+      "supported": false
+    },
     "Zvvxofp8bf16mm": {
       "supported": false
     },
@@ -1075,36 +1204,6 @@
     },
     "Zvvxofp8fp64mm": {
       "supported": false
-    },
-    "Zvbb": {
-      "supported": true
-    },
-    "Zvbc": {
-      "supported": @CONFIG_ELEN_IS_64@
-    },
-    "Zvkb": {
-      "supported": false
-    },
-    "Zvkg": {
-      "supported": true
-    },
-    "Zvkned": {
-      "supported": true
-    },
-    "Zvknha": {
-      "supported": true
-    },
-    "Zvknhb": {
-      "supported": @CONFIG_ELEN_IS_64@
-    },
-    "Zvksed": {
-      "supported": true
-    },
-    "Zvksh": {
-      "supported": true
-    },
-    "Zvkt": {
-      "supported": true
     },
     "Ssccptr": {
       "supported": true
