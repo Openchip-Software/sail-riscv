@@ -25,12 +25,11 @@ function ime_test_operand(f : ime_fp_fmt, r : bits(64), n : int) -> bits(64) = {
 
 enum ime_test_op = { IME_TEST_ADD, IME_TEST_MUL }
 
-// Run the engine op with cleared fflags; return (fflags, result).
-function ime_test_engine(f : ime_fp_fmt, op : ime_test_op, a : bits(64), b : bits(64), rm : int) -> (bits(5), bits(64)) = {
-  fcsr[FFLAGS] = zeros();
-  let r = if op == IME_TEST_MUL then ime_fp_mul(f, a, b, rm) else ime_fp_add(f, a, b, rm);
-  (fcsr[FFLAGS], r)
-}
+// Run the engine op; return (fflags, result). ime_fp_mul/ime_fp_add report
+// their flags directly and do not accrue them, so no fcsr save/restore is
+// needed here.
+function ime_test_engine(f : ime_fp_fmt, op : ime_test_op, a : bits(64), b : bits(64), rm : int) -> (bits(5), bits(64)) =
+  if op == IME_TEST_MUL then ime_fp_mul(f, a, b, rm) else ime_fp_add(f, a, b, rm)
 
 $[test]
 function test_ime_fp_vs_softfloat() -> unit = {
