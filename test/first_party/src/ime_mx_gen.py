@@ -364,6 +364,26 @@ def sext(v, bits):
     return v - (1 << bits) if v >> (bits - 1) else v
 
 
+def ref_plain_int_gemm(g, signed_a, signed_b, A, B, C):
+    """execute_ime_int_gemm (vmmacc.vv family, vm=1, ordinary Int->Int
+    accumulate, no block scaling): the exact signed or unsigned dot
+    product is added to C and the sum is truncated to EEW_C=sew bits,
+    matching to_bits_unsafe(EEW_C, acc) -- it wraps, it does not
+    saturate."""
+    mask = (1 << g.sew) - 1
+    for j in range(g.N):
+        for i in range(g.M):
+            ci = g.c_idx(i, j)
+            acc = sext(get_elem(C, g.sew, ci), g.sew)
+            for k in range(g.K):
+                araw = get_elem(A, g.eew_a, g.a_idx(i, k))
+                braw = get_elem(B, g.eew_a, g.b_idx(k, j))
+                a = sext(araw, g.eew_a) if signed_a else araw
+                b = sext(braw, g.eew_a) if signed_b else braw
+                acc += a * b
+            put_elem(C, g.sew, ci, acc & mask)
+
+
 def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
     bsz = 16 if bs16 else 32
     nblk = (g.K + bsz - 1) // bsz
@@ -452,6 +472,7 @@ GEOM = {
     (8, 32): {"lam": 2, "lmul": 4},
     (8, 64): {"lam": 1, "lmul": 8},
     # Unscaled rows only.
+    (1, 8): {"lam": 2, "lmul": 2},
     (1, 16): {"lam": 4, "lmul": 2},
     (1, 32): {"lam": 2, "lmul": 2},
     (1, 64): {"lam": 1, "lmul": 4},
@@ -460,10 +481,11 @@ GEOM = {
     (4, 64): {"lam": 1, "lmul": 4},
 }
 
-# Integer input instruction per W, and its FP-input sibling.
+# Integer input instruction per W, and its FP-input sibling. W=1 (vmmacc.vv)
+# has no vm=0 MX form, so it is only ever built with op="vmmacc" (mode="vm1").
 FP_OP = {1: "vfmmacc", 2: "vfwmmacc", 4: "vfqmmacc", 8: "vf8wmmacc"}
 INT_OP = {2: "vwmmacc", 4: "vqmmacc", 8: "v8wmmacc"}
-INT_MNEMONIC = {2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
+INT_MNEMONIC = {1: "vmmacc", 2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
 
 C_FMT = {(16, 0): "fp16", (16, 1): "bf16", (32, 0): "fp32", (64, 0): "fp64"}
 IN_FMT = {
@@ -637,7 +659,11 @@ def build_case(
         mutate(g, A, B, C, v0)
     scaled, bs16 = mode != "vm1", mode == "bs16"
     Cx, fl = bytearray(C), [0]
-    if not trap and int_inputs:
+    if not trap and int_inputs and mode == "vm1":
+        # vm=1 is the ordinary Int->Int accumulate (vmmacc.vv family, no
+        # block scaling), not the int-input MX FP-accumulate form.
+        ref_plain_int_gemm(g, alt_a == 0, alt_b == 0, A, B, Cx)
+    elif not trap and int_inputs:
         ref_int_gemm(g, fc, bs16, rm, A, B, Cx, v0, fl)
     elif not trap:
         ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, Cx, v0, fl)
@@ -1226,6 +1252,39 @@ def gate_cases(rng):
         ),
         build_case(rng, 8, 64, (0, 0, 0), "vm1", note="vf8wmmacc needs Zvvfmm", **T),
         build_case(rng, 4, 32, (0, 0, 0), "vm1", note="vfqmmacc base not implied", **T),
+        # An individual (non-MX) extension enabled alone, with neither
+        # family flag (Zvvmm/Zvvfmm) set, legalizes only its own row.
+        build_case(
+            rng,
+            1,
+            8,
+            (0, 0, 0),
+            "vm1",
+            int_inputs=True,
+            op="vmmacc",
+            note="Zvvi8mm enabled alone",
+        ),
+        build_case(
+            rng,
+            1,
+            16,
+            (0, 0, 0),
+            "vm1",
+            int_inputs=True,
+            op="vmmacc",
+            note="Zvvi16mm not enabled",
+            **T,
+        ),
+        build_case(rng, 1, 16, (0, 0, 0), "vm1", note="Zvvfp16mm enabled alone"),
+        build_case(
+            rng,
+            1,
+            16,
+            (0, 1, 0),
+            "vm1",
+            note="mixed FP16/BF16 also needs Zvvbf16mm",
+            **T,
+        ),
     ]
 
 

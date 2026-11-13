@@ -5,6 +5,12 @@
     },
     "Zvvxni8fp32mm": {
       "supported": true
+    },
+    "Zvvi8mm": {
+      "supported": true
+    },
+    "Zvvfp16mm": {
+      "supported": true
     }
   }
 }
