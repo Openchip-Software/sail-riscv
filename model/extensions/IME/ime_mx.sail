@@ -375,24 +375,29 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
                (if same_inputs then bf16_c == bf16_in else true),
     // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1490-1494).
     (1, 32) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp32mm),
-    (1, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp64mm),
+    // Zvvfp64mm's currentlyEnabled clause is also true when Zvvfmm is
+    // enabled, and Zvvfmm's own dependency is Zve32f, not Zve64d: the
+    // explicit check here is required, not redundant (AMB-15).
+    (1, 64) => not(bf16_c) & currentlyEnabled(Ext_Zve64d) & currentlyEnabled(Ext_Zvvfp64mm),
     // OFP8 -> FP16/BF16.
     (2, 16) => if bf16_c then currentlyEnabled(Ext_Zvvofp8bf16mm) else currentlyEnabled(Ext_Zvvofp8fp16mm),
     // FP16/BF16 -> FP32; the C format is fixed at FP32 (no "BF32").
     (2, 32) => not(bf16_c) & ime_fp16bf16_ext_ok(Ext_Zvvfp16fp32mm, Ext_Zvvbf16fp32mm, same_inputs, bf16_in),
-    // FP32 -> FP64 (altfmt_A/altfmt_B ignored).
-    (2, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp32fp64mm),
+    // FP32 -> FP64 (altfmt_A/altfmt_B ignored). See the (1, 64) comment.
+    (2, 64) => not(bf16_c) & currentlyEnabled(Ext_Zve64d) & currentlyEnabled(Ext_Zvvfp32fp64mm),
     // OFP4 -> FP16/BF16.
     (4, 16) => default_inputs &
                (if bf16_c then currentlyEnabled(Ext_Zvvofp4bf16mm) else currentlyEnabled(Ext_Zvvofp4fp16mm)),
     // OFP8 -> FP32.
     (4, 32) => not(bf16_c) & currentlyEnabled(Ext_Zvvofp8fp32mm),
-    // FP16/BF16 -> FP64; the C format is fixed at FP64 (no "BF64").
-    (4, 64) => not(bf16_c) & ime_fp16bf16_ext_ok(Ext_Zvvfp16fp64mm, Ext_Zvvbf16fp64mm, same_inputs, bf16_in),
+    // FP16/BF16 -> FP64; the C format is fixed at FP64 (no "BF64"). See the
+    // (1, 64) comment.
+    (4, 64) => not(bf16_c) & currentlyEnabled(Ext_Zve64d) &
+               ime_fp16bf16_ext_ok(Ext_Zvvfp16fp64mm, Ext_Zvvbf16fp64mm, same_inputs, bf16_in),
     // OFP4 -> FP32.
     (8, 32) => default_inputs & not(bf16_c) & currentlyEnabled(Ext_Zvvofp4fp32mm),
-    // OFP8 -> FP64.
-    (8, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvofp8fp64mm),
+    // OFP8 -> FP64. See the (1, 64) comment.
+    (8, 64) => not(bf16_c) & currentlyEnabled(Ext_Zve64d) & currentlyEnabled(Ext_Zvvofp8fp64mm),
     _       => false,
   }
 }
@@ -437,21 +442,24 @@ function ime_int_mx_row_ok(W : nat, SEW : int) -> bool = {
 // change which extension the row requires. (W, SEW) combinations with no
 // row in the table (vqmmacc/v8wmmacc at SEW=8, v8wmmacc at SEW=16) are
 // reserved.
+// The four SEW=64 cells also check Zve64x explicitly: each of their
+// extensions' currentlyEnabled clause is also true when Zvvmm is enabled,
+// and Zvvmm's own dependency is Zve32x, not Zve64x (AMB-15).
 function ime_int_row_ok(W : nat, SEW : int) -> bool =
   match (W, SEW) {
     (1, 8)  => currentlyEnabled(Ext_Zvvi8mm),
     (1, 16) => currentlyEnabled(Ext_Zvvi16mm),
     (1, 32) => currentlyEnabled(Ext_Zvvi32mm),
-    (1, 64) => currentlyEnabled(Ext_Zvvi64mm),
+    (1, 64) => currentlyEnabled(Ext_Zve64x) & currentlyEnabled(Ext_Zvvi64mm),
     (2, 8)  => currentlyEnabled(Ext_Zvvi4i8mm),
     (2, 16) => currentlyEnabled(Ext_Zvvi8i16mm),
     (2, 32) => currentlyEnabled(Ext_Zvvi16i32mm),
-    (2, 64) => currentlyEnabled(Ext_Zvvi32i64mm),
+    (2, 64) => currentlyEnabled(Ext_Zve64x) & currentlyEnabled(Ext_Zvvi32i64mm),
     (4, 16) => currentlyEnabled(Ext_Zvvi4i16mm),
     (4, 32) => currentlyEnabled(Ext_Zvvi8i32mm),
-    (4, 64) => currentlyEnabled(Ext_Zvvi16i64mm),
+    (4, 64) => currentlyEnabled(Ext_Zve64x) & currentlyEnabled(Ext_Zvvi16i64mm),
     (8, 32) => currentlyEnabled(Ext_Zvvi4i32mm),
-    (8, 64) => currentlyEnabled(Ext_Zvvi8i64mm),
+    (8, 64) => currentlyEnabled(Ext_Zve64x) & currentlyEnabled(Ext_Zvvi8i64mm),
     _       => false,
   }
 
