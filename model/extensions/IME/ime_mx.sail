@@ -299,17 +299,21 @@ function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
 // vm=1 legality per tbl-fp-encoding-map for the implemented rows. altfmt
 // selects the C format; OFP4 inputs require altfmt_A = altfmt_B = 0.
 function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
+  let same_inputs = vtype[altfmt_A] == vtype[altfmt_B];
   let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
   let zvvfmm = currentlyEnabled(Ext_Zvvfmm);
   match (W, SEW) {
-    // FP16, FP32, FP64 with same-format C.
-    (1, 16) => default_inputs & not(bf16_c) & zvvfmm,
-    (1, 32) => default_inputs & not(bf16_c) & zvvfmm,
-    (1, 64) => default_inputs & not(bf16_c) & zvvfmm,
-    // FP16/BF16 -> FP32, FP32 -> FP64, FP16/BF16 -> FP64.
+    // FP16 x FP16 -> FP16 and BF16 x BF16 -> BF16 are legal; FP16 x FP16 ->
+    // BF16 and BF16 x BF16 -> FP16 are reserved. A mixed FP16/BF16 input
+    // pair is legal into either C format (S:7298-7305).
+    (1, 16) => zvvfmm & (if same_inputs then vtype[altfmt] == vtype[altfmt_A] else true),
+    // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1490-1494).
+    (1, 32) => not(bf16_c) & zvvfmm,
+    (1, 64) => not(bf16_c) & zvvfmm,
+    // FP16/BF16 -> FP32, FP32 -> FP64 (altfmt_A/altfmt_B ignored), FP16/BF16 -> FP64.
     (2, 32) => not(bf16_c) & zvvfmm,
-    (2, 64) => default_inputs & not(bf16_c) & zvvfmm,
+    (2, 64) => not(bf16_c) & zvvfmm,
     (4, 64) => not(bf16_c) & zvvfmm,
     // OFP8 -> FP16/BF16, OFP4 -> FP16/BF16, OFP8 -> FP32.
     (2, 16) => if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp8bf16mm, Ext_Zvvxnofp8bf16mm)
@@ -400,6 +404,8 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
                else ime_fp_base_row_ok(W, SEW);
   if not(row_ok) | not(ime_gemm_groups_ok(g, vs1, vs2, vd)) then return Illegal_Instruction();
 
+  // tbl-fp-encoding-map has one EEW column for both Input A and Input B, so
+  // g.EEW_A is also operand B's width; only altfmt_A vs. altfmt_B differs.
   let fmt_A = ime_fp_format_of(g.EEW_A, vtype[altfmt_A]);
   let fmt_B = ime_fp_format_of(g.EEW_A, vtype[altfmt_B]);
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);

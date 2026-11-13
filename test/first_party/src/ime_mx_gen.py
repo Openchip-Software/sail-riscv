@@ -1093,32 +1093,40 @@ def group_tie(fa, fb, fc):
 
 
 def fp_row_cases(rng):
+    # (W, SEW, [(altfmt_A, altfmt_B, altfmt), ...]) per tbl-fp-encoding-map row
+    # group. SEW=16 W=1 lists every (altfmt_A, altfmt_B, altfmt) combination
+    # the table marks legal: same-format inputs (FP16xFP16, BF16xBF16) are
+    # legal only into the matching C format, and a mixed FP16/BF16 input pair
+    # is legal into either C format. SEW=32/64 W=1 and SEW=64 W=2 ignore
+    # altfmt_A/altfmt_B for their FP32/FP64 inputs (S:1127, S:1490-1494), so
+    # altfmt_A=1 is included to show it still executes.
     rows = [
-        (1, 16, [(0, 0)]),
-        (1, 32, [(0, 0)]),
-        (1, 64, [(0, 0)]),
-        (2, 32, OFP8_PAIRS),
-        (2, 64, [(0, 0)]),
-        (4, 64, OFP8_PAIRS),
-        (8, 32, [(0, 0)]),
-        (8, 64, OFP8_PAIRS),
+        (1, 16, [(0, 0, 0), (1, 1, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1)]),
+        (1, 32, [(0, 0, 0), (1, 0, 0)]),
+        (1, 64, [(0, 0, 0), (1, 0, 0)]),
+        (2, 32, [(a, b, 0) for a, b in OFP8_PAIRS]),
+        (2, 64, [(0, 0, 0), (1, 0, 0)]),
+        (4, 64, [(a, b, 0) for a, b in OFP8_PAIRS]),
+        (8, 32, [(0, 0, 0)]),
+        (8, 64, [(a, b, 0) for a, b in OFP8_PAIRS]),
     ]
     cases, n = [], 0
-    for W, sew, pairs in rows:
-        for alt_a, alt_b in pairs:
+    for W, sew, triples in rows:
+        for alt_a, alt_b, alt in triples:
             cases.append(
-                build_case(rng, W, sew, (alt_a, alt_b, 0), "vm1", RMS[n % len(RMS)])
+                build_case(rng, W, sew, (alt_a, alt_b, alt), "vm1", RMS[n % len(RMS)])
             )
             n += 1
         if W > 1:
+            last_b = triples[-1][1]
             g_in = sew // W
-            fa, fb = IN_FMT[(g_in, 0)], IN_FMT[(g_in, pairs[-1][1])]
+            fa, fb = IN_FMT[(g_in, 0)], IN_FMT[(g_in, last_b)]
             cases.append(
                 build_case(
                     rng,
                     W,
                     sew,
-                    (0, pairs[-1][1], 0),
+                    (0, last_b, 0),
                     "vm1",
                     RNE,
                     mutate=group_tie(fa, fb, C_FMT[(sew, 0)]),
