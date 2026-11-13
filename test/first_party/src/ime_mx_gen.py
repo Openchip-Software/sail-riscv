@@ -3,14 +3,20 @@
 """Generate the IME microscaling (MX) first-party tests.
 
 An independent Python reference of the IME specification pseudocode
-(fp_gemm, fp_scaled_gemm, int_scaled_gemm) computes the expected C tiles and
-accrued fflags. Each generated test loads A, B, C and v0, runs one matrix
-instruction (as a .word encoding), and compares the C register group bytes
-and fflags. A failing test exits with the number of the failing case.
+(fp_gemm, fp_scaled_gemm, int_scaled_gemm, read_block_scales) computes the
+expected C tiles and accrued fflags. Each generated test loads A, B, C and
+v0, runs one matrix instruction (as a .word encoding), and compares the C
+register group bytes and fflags. A failing test exits with the number of
+the failing case.
 
 Disclosed FP profile mirrored here: G=1, psm=0 (exact), rnd=frm. Per group,
-the W products are summed exactly, scaled exactly by 2^(eA + eB - 254)
-(vm=0), rounded once to the C format, and added to C (rounded once more).
+the W products are summed exactly; for vm=0 the group sum is rounded to the
+C format, then multiplied by the paired block scale in the C format, then
+added to C (another rounding). The paired block scale is itself the
+C-format product of scale_A and scale_B, each separately converted from
+E8M0 to the C format under frm. Each conversion, the scale product, the
+group-sum rounding, the scaling multiply, and the final add is a separate
+rounding point with its own flags (S:1958-2027, S:5097-5124).
 
 Usage:  ime_mx_gen.py [output_dir]      (default: this script's directory)
 """
@@ -199,6 +205,10 @@ def fp_add(fmt, a, b, rm, fl):
     return rnd(fmt, add(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), rm, fl), rm, fl)
 
 
+def fp_mul(fmt, a, b, rm, fl):
+    return rnd(fmt, mul(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), fl), rm, fl)
+
+
 def is_nan(fmt, v):
     return decode(fmt, v)[0][0] == "nan"
 
@@ -291,14 +301,21 @@ def get_elem(buf, eew, idx):
 # ---------------------------------------------------------------------------
 
 
-def block_scales(g, v0, i, j, s):
-    """Exact combined scale 2^(eA + eB - 254), or NaN if either is 0xFF."""
+def block_scale(fc, rm, g, v0, i, j, s, fl):
+    """read_block_scales: convert scale_A and scale_B to fmt_C under rm
+    (each a separate rounding point), then multiply them in fmt_C (one more
+    rounding). Returns (blk_scale_bits, is_nan). NaN either when either
+    encoded E8M0 value is 0xFF (no flags), or when the conversions and
+    multiplication produce NaN, e.g. +0 times +inf."""
     R = g.lam * g.sew // 16
     ea = get_elem(v0, 16, i * R + s) & 0xFF
     eb = get_elem(v0, 16, j * R + s) >> 8
     if E8M0_NAN in (ea, eb):
-        return ("nan",), True
-    return ("fin", 0, Fraction(2) ** (ea + eb - 2 * E8M0_BIAS)), False
+        return canonical_nan(fc), True
+    sa = rnd(fc, ("fin", 0, Fraction(2) ** (ea - E8M0_BIAS)), rm, fl)
+    sb = rnd(fc, ("fin", 0, Fraction(2) ** (eb - E8M0_BIAS)), rm, fl)
+    blk = fp_mul(fc, sa, sb, rm, fl)
+    return blk, is_nan(fc, blk)
 
 
 def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
@@ -313,7 +330,7 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
             for s in range(nblk):
                 blk = None
                 if scaled:
-                    blk, nan_out = block_scales(g, v0, i, j, s)
+                    blk, nan_out = block_scale(fc, rm, g, v0, i, j, s, fl)
                     if nan_out:
                         break
                 blo, bhi = s * bsz, min(s * bsz + bsz, g.K) - 1
@@ -334,9 +351,12 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
                             b = dec_flags(fb, get_elem(B, g.eew_a, g.b_idx(k, j)), fl)
                             prod = mul(a, b, fl)
                             S = prod if S is None else add(S, prod, rm, fl)
-                        if scaled:
-                            S = mul(S, blk, fl)
-                        acc = fp_add(fc, acc, rnd(fc, S, rm, fl), rm, fl)
+                        # S is rounded to fmt_C before scaling: a separate
+                        # rounding point from the final accumulation
+                        # (S:2098-2102).
+                        s_bits = rnd(fc, S, rm, fl)
+                        term = fp_mul(fc, blk, s_bits, rm, fl) if scaled else s_bits
+                        acc = fp_add(fc, acc, term, rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
 
@@ -353,7 +373,7 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
             acc = get_elem(C, g.sew, ci)
             nan_out = False
             for s in range(nblk):
-                blk, nan_out = block_scales(g, v0, i, j, s)
+                blk, nan_out = block_scale(fc, rm, g, v0, i, j, s, fl)
                 if nan_out:
                     break
                 dot = 0
@@ -361,8 +381,11 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
                     a = sext(get_elem(A, g.eew_a, g.a_idx(i, k)), g.eew_a)
                     b = sext(get_elem(B, g.eew_a, g.b_idx(k, j)), g.eew_a)
                     dot += a * b
+                # int_to_fp(dot, fmt_C, rm): round the exact integer sum to
+                # the C format before multiplying by the block scale.
                 xs = ("fin", 1 if dot < 0 else 0, Fraction(abs(dot)))
-                acc = fp_add(fc, acc, rnd(fc, mul(xs, blk, fl), rm, fl), rm, fl)
+                fp_sum = rnd(fc, xs, rm, fl)
+                acc = fp_add(fc, acc, fp_mul(fc, blk, fp_sum, rm, fl), rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
 
@@ -839,6 +862,34 @@ def special_cases(rng):
         set_scale(g, v0, 0, 0, scale_a=0xFE)
         set_scale(g, v0, 1, 0, scale_b=0xFE)
 
+    def zero_times_inf_scale(g, A, B, C, v0):
+        """scale_A of row 0 (field 0x00, 2^-127) converts to +0 in FP16;
+        scale_B of column 2 (field 0xFE, 2^127) converts to +inf. Both
+        encoded scales are finite, but the fmt_C paired-scale multiply at
+        C[0][2] sees +0 times +inf: default NaN, NV (S:2008-2027)."""
+        set_scale(g, v0, 0, 0, scale_a=0x00)
+        set_scale(g, v0, 2, 0, scale_b=0xFE)
+
+    def int_overflow(g, A, B, C, v0):
+        """dot(0,0) = 5 * 127 * 127 = 80645 > 65504 (FP16 max): int_to_fp
+        rounds the exact dot to FP16 before scaling and overflows to +inf,
+        OF|NX. Every scale pair is the E8M0 field for 2^0 = 1.0 (exact, no
+        flags), and every other A/B element is 0, so the scaled term for
+        every other output element is exactly +0 and the test is otherwise
+        flag-free."""
+        for i in range(g.M):
+            for k in range(g.K):
+                put_elem(A, g.eew_a, g.a_idx(i, k), 0)
+        for j in range(g.M):
+            for k in range(g.K):
+                put_elem(B, g.eew_a, g.b_idx(k, j), 0)
+        for k in range(5):
+            put_elem(A, g.eew_a, g.a_idx(0, k), 127)
+            put_elem(B, g.eew_a, g.b_idx(k, 0), 127)
+        put_elem(C, g.sew, g.c_idx(0, 0), 0)
+        for p in range(VLEN // 16):
+            put_elem(v0, 16, p, E8M0_BIAS | (E8M0_BIAS << 8))
+
     def neg_zero_sum(g, A, B, C, v0):
         """C[0][0] = -0 and every A[0][k]*B[k][0] product (k=0..K-1) is
         exactly -0 (A=+0, B=-1.0 fp16). A W=1 group is a single product,
@@ -863,6 +914,37 @@ def special_cases(rng):
         build_case(
             rng, 2, 16, (0, 0, 1), "bs32", RNE, mutate=bf16_ovf, note="bf16-ovf"
         ),
+        build_case(
+            rng,
+            4,
+            32,
+            (0, 1, 0),
+            "bs32",
+            RUP,
+            mutate=tiny_scale,
+            note="tiny-scale-min-subnormal",
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            e5,
+            "bs32",
+            RNE,
+            mutate=zero_times_inf_scale,
+            note="zero-times-inf-scale",
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            (0, 0, 0),
+            "bs32",
+            RNE,
+            int_inputs=True,
+            mutate=int_overflow,
+            note="int-overflow",
+        ),
         build_case(rng, 4, 32, (1, 0, 0), "bs32", RDN, lmul=2, note="partial"),
         build_case(
             rng, 4, 32, (0, 0, 0), "bs32", RMM, int_inputs=True, lmul=2, note="partial"
@@ -886,7 +968,7 @@ def special_cases(rng):
             "bs32",
             RNE,
             mutate=double_round_fp,
-            note="exact-scale",
+            note="round-before-scale",
         ),
         build_case(
             rng,
@@ -897,7 +979,7 @@ def special_cases(rng):
             RNE,
             int_inputs=True,
             mutate=double_round_int,
-            note="exact-scale",
+            note="round-before-scale",
         ),
         build_case(
             rng,
@@ -920,8 +1002,12 @@ def zero_row0(g, A, C):
 
 def double_round_fp(g, A, B, C, v0):
     """S = 1.25 + 2^-32 (E5M2 1.25*1.0 + 2^-16*2^-16), scale 2^-148, FP32 C.
-    Exact: 2*S units of 2^-149 = 2.5 + tiny -> 3. Rounding S first gives
-    1.25 -> 2.5 units, a tie -> 2."""
+    S is rounded to FP32 before scaling (round-to-nearest-even): the
+    2^-32 term is far below FP32's ULP at 1.25, so S rounds down to exactly
+    1.25. Scaling the rounded 1.25 by 2^-148 gives 2.5 units of the minimum
+    subnormal 2^-149, an exact tie that rounds to the even value 2. Scaling
+    the unrounded exact sum first (2*S units of 2^-149 = 2.5 + tiny) would
+    instead round unambiguously up to 3."""
     zero_row0(g, A, C)
     for k, a, b in ((0, 0x3D, 0x3C), (1, 0x01, 0x01)):
         put_elem(A, g.eew_a, g.a_idx(0, k), a)
@@ -932,8 +1018,14 @@ def double_round_fp(g, A, B, C, v0):
 
 def double_round_int(g, A, B, C, v0):
     """dot = 64*32 + 1*1 = 2049, scale 2^-36, FP16 C (subnormal unit 2^-24).
-    Exact: 2049 * 2^-36 = 0.5002 units -> 1. Rounding the dot to FP16 first
-    gives 2048 -> 0.5 units, a tie -> 0."""
+    int_to_fp rounds the exact dot to FP16 before scaling
+    (round-to-nearest-even): 2049 is a tie between 2048 and 2050 at FP16's
+    ULP there, and rounds down to the even value 2048. The scales 2^-18
+    each convert to FP16 exactly (subnormal, no rounding error), but their
+    product 2^-36 is far below FP16's minimum subnormal 2^-24 and rounds to
+    +0, so the final scaled term is +0. Scaling the unrounded exact dot
+    first (2049 * 2^-36 = 0.5002 units of 2^-24) would instead round
+    unambiguously up to 1."""
     zero_row0(g, A, C)
     for k, a, b in ((0, 64, 32), (1, 1, 1)):
         put_elem(A, g.eew_a, g.a_idx(0, k), a)
@@ -1245,16 +1337,36 @@ def main():
     }
     files["test_ime_mx_special.S"] = (
         (
-            "MX special values and block edge cases (see each case title):\n"
+            "MX special values and block edge cases (see each case title). Each\n"
+            "scale is converted to fmt_C under frm and the two converted scales are\n"
+            "multiplied in fmt_C before the group sum is scaled (S:1958-2027):\n"
             "  nan-scale: E8M0 0xFF for A row 0, block 1 -> row 0 is the canonical NaN;\n"
             "    block 2 of row 0 would overflow FP16 (OF) but must not be evaluated.\n"
-            "  scale-ovf: E8M0 0xFE (2^127) scales FP16 sums past the range: OF|NX.\n"
-            "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0).\n"
-            "  tiny-scale: E8M0 0x00 pairs (2^-254) scale FP32 sums to 0, UF|NX.\n"
-            "  bf16-ovf: 0xFE x 0xFE = 2^254 overflows BF16.\n"
+            "  scale-ovf: E8M0 0xFE (2^127) converts to +inf in FP16 for A row 1. Every\n"
+            "    group of that row's first block is then scaled to a signed infinity;\n"
+            "    groups of opposite sign collide into the default NaN (NV) in addition\n"
+            "    to the OF|NX of the scale conversion itself.\n"
+            "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0). This is\n"
+            "    an A/B input product, not a block scale.\n"
+            "  tiny-scale: E8M0 0x00 pairs convert to +0 in FP32 under round-to-\n"
+            "    nearest-even (2^-127 is far below the minimum subnormal); the scaled\n"
+            "    term is exactly +0, UF|NX from the scale conversions.\n"
+            "  tiny-scale-min-subnormal: the same E8M0 0x00 pairs under round-up\n"
+            "    convert to the minimum positive FP32 subnormal instead of +0.\n"
+            "  zero-times-inf-scale: scale_A of row 0 converts to +0 (E8M0 0x00) and\n"
+            "    scale_B of column 2 converts to +inf (E8M0 0xFE); their fmt_C product\n"
+            "    at C[0][2] is the default NaN, NV (S:2008-2027), even though both\n"
+            "    encoded E8M0 scales are finite.\n"
+            "  int-overflow: an exact MXINT8 dot product of 80645 overflows FP16 (OF)\n"
+            "    in int_to_fp, before it is multiplied by the (here unit) block scale.\n"
+            "  bf16-ovf: 0xFE x 0xFE converts to +inf in BF16 at the fmt_C scale\n"
+            "    multiply (not from the group sum), similarly colliding to NaN+NV\n"
+            "    across opposite-signed groups for its target element.\n"
             "  partial: K_eff=16 is a single partial BS=32 block.\n"
-            "  exact-scale: the scale applies to the exact sum before its single\n"
-            "    rounding; rounding first would tie the other way (FP32 and FP16)."
+            "  round-before-scale: the group sum (or, for the integer path, the exact\n"
+            "    dot product) is rounded to fmt_C before the scaling multiply, not\n"
+            "    the unrounded exact value; the two round separately and can round to\n"
+            "    different ties (FP32 and FP16)."
         ),
         special_cases(rng),
     )

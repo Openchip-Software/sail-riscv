@@ -13,12 +13,14 @@
 //
 //   k:   |<- W ->|<- W ->| ...            (one LMUL=1 step = lambda groups)
 //   S  = exact sum of the W products of the group
-//   C  = round_frm(C + round_frm(S))                      (vm=1)
-//   C  = round_frm(C + round_frm(S * 2^(eA + eB - 254)))  (vm=0)
+//   C  = round_frm(C + round_frm(S))                                 (vm=1)
+//   C  = round_frm(C + fp_mul(blk_scale, round_frm(S)))              (vm=0)
 //
-// The E8M0 scale pair multiplies S exactly; it is never converted to the C
-// format first. This deviates from the specification text (read_block_scales
-// rounds scale_A * scale_B in the C format), which is believed to be wrong.
+// where blk_scale = fp_mul(conv(scale_A), conv(scale_B)) and conv() rounds
+// one E8M0 value to the C format under frm (S:1958-2027, S:5097-5124). Each
+// of conv(scale_A), conv(scale_B), their product, round_frm(S), and the two
+// final multiplies/adds is a separate rounding point with its own flags;
+// the scale is never applied to the unrounded exact sum.
 //
 // v0 scale layout (vm=0): 16-bit element p = m * R + s holds the E8M0 pair
 // for row/column m and K block s; bits [7:0] scale A rows, [15:8] scale B
@@ -153,16 +155,29 @@ function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
-// read_block_scales: the exact combined block scale
-// scale_A[i,s] * scale_B[j,s] = 2^(eA + eB - 254), or NaN when either E8M0
-// value is 0xFF. Raises no flags. Example: eA=0x80, eB=0x7e -> 2^0.
-function ime_block_scales(g : ime_gemm_geom, i : nat, j : nat, s : nat) -> ime_fpx = {
+// read_block_scales (S:1958-2027, S:5097-5124): convert scale_A[i,s] and
+// scale_B[j,s] to fmt_C under rm, accruing each conversion's flags, then
+// form their product with one fmt_C-rounded multiply. Returns the combined
+// block scale's bits, its accrued flags, and whether it is NaN.
+//
+// The combined block scale is NaN either when either encoded E8M0 value is
+// 0xFF (no flags for that case: the NaN scale is detected before any
+// conversion), or when the two fmt_C conversions and their multiplication
+// produce NaN, for example +0 times +inf when range conversion under rm
+// sends one scale to +0 and the other to +inf (S:2008-2027).
+function ime_block_scale(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
+                         i : nat, j : nat, s : nat) -> (bits_fflags, bits(64), bool) = {
   let R = ime_div(g.lambda * g.EEW_C, IME_SCALE_PAIR_BITS);
   let eA : bits(8) = read_single_element(16, i * R + s, zvreg)[7 .. 0];
   let eB : bits(8) = read_single_element(16, j * R + s, zvreg)[15 .. 8];
-  if eA == IME_E8M0_NAN | eB == IME_E8M0_NAN
-  then IME_FPX_NAN()
-  else IME_FPX_FIN(0b0, 1, unsigned(eA) + unsigned(eB) - 2 * IME_E8M0_BIAS)
+  if eA == IME_E8M0_NAN | eB == IME_E8M0_NAN then (zeros(), ime_fp_canonical_nan(fmt_C), true)
+  else {
+    let (flags_a, scale_a) = ime_fp_round(fmt_C, IME_FPX_FIN(0b0, 1, unsigned(eA) - IME_E8M0_BIAS), rm);
+    let (flags_b, scale_b) = ime_fp_round(fmt_C, IME_FPX_FIN(0b0, 1, unsigned(eB) - IME_E8M0_BIAS), rm);
+    let (flags_mul, blk_scale) = ime_fp_mul(fmt_C, scale_a, scale_b, rm);
+    let (decoded, _) = ime_fp_decode(fmt_C, blk_scale);
+    (flags_a | flags_b | flags_mul, blk_scale, ime_fpx_is_nan(decoded))
+  }
 }
 
 // One term A[i,k] * B^T[k,j] of a group: decoded and multiplied exactly.
@@ -221,10 +236,11 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
       foreach (s from 0 to (S_blocks - 1)) {
         // A NaN combined scale forces C[i,j] to NaN and ends its evaluation.
         if not(nan_out) then {
-          let blk_scale : ime_fpx =
-            if scaling == IME_MX_SCALED then ime_block_scales(g, i, j, s)
-            else IME_FPX_FIN(0b0, 1, 0);
-          nan_out = ime_fpx_is_nan(blk_scale);
+          let (blk_flags, blk_scale, blk_is_nan) : (bits_fflags, bits(64), bool) =
+            if scaling == IME_MX_SCALED then ime_block_scale(g, fmt_C, rm, i, j, s)
+            else (zeros(), zeros(), false);
+          elem_flags = elem_flags | blk_flags;
+          nan_out = blk_is_nan;
 
           if not(nan_out) then {
             let blk_k_lo : nat = s * block_size;
@@ -245,11 +261,15 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
                   let k_lo : nat = step_k_lo + g0 * g.W;
                   let k_hi = ime_nat(k_lo + sizeof(ime_fp_grouping) * g.W - 1);
                   let (flags_sum, S) = ime_fp_group_sum(g, i, j, k_lo, k_hi, fmt_A, fmt_B, rm, vs1, vs2);
-                  let (flags_mul, prod) = ime_fpx_mul(S, blk_scale);
-                  let (flags_round, term) = ime_fp_round(fmt_C, prod, rm);
+                  // S is rounded to fmt_C before scaling: a separate
+                  // rounding point from the final accumulation (S:2098-2102).
+                  let (flags_round, S_bits) = ime_fp_round(fmt_C, S, rm);
+                  let (flags_scale, term) : (bits_fflags, bits(64)) =
+                    if scaling == IME_MX_SCALED then ime_fp_mul(fmt_C, blk_scale, S_bits, rm)
+                    else (zeros(), S_bits);
                   let (flags_add, new_acc) = ime_fp_add(fmt_C, acc, term, rm);
                   acc = new_acc;
-                  elem_flags = elem_flags | flags_sum | flags_mul | flags_round | flags_add
+                  elem_flags = elem_flags | flags_sum | flags_round | flags_scale | flags_add
                 }
               }
             }
@@ -265,8 +285,10 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
   }
 }
 
-// int_scaled_gemm: per block, the exact signed integer dot product is scaled
-// exactly, rounded once to the C format, and added to C (rounded per frm).
+// int_scaled_gemm (S:1283-1293, S:5398-5400): per block, the exact signed
+// integer dot product is converted to fmt_C under rm (int_to_fp, a separate
+// rounding point), multiplied by the block scale in fmt_C, and added to C
+// (rounded per frm).
 function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
                              vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> unit = {
   let block_size = ime_mx_block_size();
@@ -281,8 +303,9 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
 
       foreach (s from 0 to (S_blocks - 1)) {
         if not(nan_out) then {
-          let blk_scale = ime_block_scales(g, i, j, s);
-          nan_out = ime_fpx_is_nan(blk_scale);
+          let (blk_flags, blk_scale, blk_is_nan) = ime_block_scale(g, fmt_C, rm, i, j, s);
+          elem_flags = elem_flags | blk_flags;
+          nan_out = blk_is_nan;
 
           if not(nan_out) then {
             let k_lo : nat = s * block_size;
@@ -294,11 +317,13 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
               let b_flat = ime_mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
               dot = dot + ime_read_in_signed(g.EEW_A, a_flat, vs1) * ime_read_in_signed(g.EEW_A, b_flat, vs2)
             };
-            let (flags_mul, prod) = ime_fpx_mul(ime_fpx_of_int(dot), blk_scale);
-            let (flags_round, term) = ime_fp_round(fmt_C, prod, rm);
+            // int_to_fp(dot, fmt_C, rm): round the exact integer sum to the
+            // C format before multiplying by the block scale.
+            let (flags_cvt, fp_sum) = ime_fp_round(fmt_C, ime_fpx_of_int(dot), rm);
+            let (flags_scale, term) = ime_fp_mul(fmt_C, blk_scale, fp_sum, rm);
             let (flags_add, new_acc) = ime_fp_add(fmt_C, acc, term, rm);
             acc = new_acc;
-            elem_flags = elem_flags | flags_mul | flags_round | flags_add
+            elem_flags = elem_flags | flags_cvt | flags_scale | flags_add
           }
         }
       };
