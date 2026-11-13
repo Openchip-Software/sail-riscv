@@ -3,6 +3,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
 
+// Largest C register group (EMUL_C) allowed by the specification. Used by
+// both the microscaled engine in ime_mx.sail and the unscaled integer
+// multiply-accumulate path in ime_mem_insts.sail.
+let IME_EMUL_C_MAX = 16
+
 // Zvvm family-level, individual computational, and microscaling
 // extension dependencies, sorted alphabetically. Family-level flags
 // (Zvvmm, Zvvfmm) imply every extension in their family; a BS=16 (xn)

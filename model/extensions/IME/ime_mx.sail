@@ -41,8 +41,8 @@ let IME_E8M0_NAN : bits(8) = 0xFF
 let IME_MX_BLOCK_BS0 = 32
 let IME_MX_BLOCK_BS1 = 16
 
-// Largest C register group (EMUL_C) allowed by the specification.
-let IME_EMUL_C_MAX = 16
+// IME_EMUL_C_MAX lives in ime_types.sail: the unscaled integer
+// multiply-accumulate path in ime_mem_insts.sail uses it too.
 
 // Whether an FP GEMM applies v0 block scales.
 enum ime_scaling = { IME_UNSCALED, IME_MX_SCALED }
