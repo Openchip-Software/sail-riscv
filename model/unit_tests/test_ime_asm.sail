@@ -24,6 +24,13 @@ function test_ime_mmacc_assembly() -> unit = {
   assert(assembly(IMEVMMACCTYPE(0b1, v4, v2, v8)) == "vmmacc.vv v8, v2, v4");
   assert(assembly(IMEVFMMACCTYPE(0b1, v4, v2, v8)) == "vfmmacc.vv v8, v2, v4");
 
+  // vm=0 is reserved for both vmmacc.vv and vfmmacc.vv; execution raises
+  // illegal instruction, but the assembly mapping still prints the
+  // reserved encoding with the v0.scale suffix used by the vm=0 MX forms
+  // below.
+  assert(assembly(IMEVMMACCTYPE(0b0, v4, v2, v8)) == "vmmacc.vv v8, v2, v4, v0.scale");
+  assert(assembly(IMEVFMMACCTYPE(0b0, v4, v2, v8)) == "vfmmacc.vv v8, v2, v4, v0.scale");
+
   // vm=0 selects the integer-input microscaled forms.
   assert(assembly(IMEVWMMACCTYPE(0b1, v4, v2, v8)) == "vwmmacc.vv v8, v2, v4");
   assert(assembly(IMEVWMMACCTYPE(0b0, v4, v2, v8)) == "vfwimmacc.vv v8, v2, v4, v0.scale");
