@@ -1,6 +1,8 @@
 # Integrated Matrix Extension (IME / Zvvm) implementation notes
 
-This is the status note for the initial Sail implementation loop for the draft RISC-V Integrated Matrix Extension. It documents what is implemented in this tree, how it is tested, and the known limitations that should guide the next development loop.
+This is the status note for the Sail implementation of the draft RISC-V Integrated Matrix Extension. It documents what is implemented in this tree, how it is tested, and the known limitations that should guide the next development loop.
+
+Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/unpriv/integrated-matrix.adoc`.
 
 ## Implemented pieces
 
@@ -8,77 +10,81 @@ This is the status note for the initial Sail implementation loop for the draft R
   - `Ext_Zvvmm` for integer matrix multiply-accumulate.
   - `Ext_Zvvmtls` for order-preserving tile load/store.
   - `Ext_Zvvmttls` for transposing tile load/store.
-  - `Ext_Zvvfmm` gates the staged unscaled floating-point matrix multiply-accumulate rows implemented so far.
-  - 28 fine-grained microscaling extensions: `Zvvx{ofp4,ofp8}{fp16,bf16,fp32,fp64}mm` / `Zvvx{i4,i8}{...}mm` (BS=32) and their `Zvvxn*` (BS=16) forms, per `tbl-mx-extensions`. `Zvvxn*` implies the matching `Zvvx*`; a FP `Zvvx*` also implies its base row (see "Microscaling (MX) loop").
+  - `Ext_Zvvfmm` gates the unscaled floating-point matrix multiply-accumulate rows.
+  - 30 fine-grained microscaling extensions: `Zvvx{ofp4,ofp8}{fp16,bf16,fp32,fp64}mm` / `Zvvx{i4,i8}{...}mm` (BS=32) and their `Zvvxn*` (BS=16) forms, per `tbl-mx-extensions`. `Zvvxn*` implies the matching `Zvvx*`; a floating-point-input `Zvvx*` also implies its base row (see "Microscaling (MX) loop"). `Zvvxofp4ofp8mm` and `Zvvxnofp4ofp8mm` are part of this count but execute nowhere yet: the OFP8 accumulator rows they would gate are not implemented (see "Known gaps"). Every microscaling extension with a BF16, FP16, or FP32 accumulator requires `Zve32f`; the four with an FP64 accumulator require `Zve64d`. The integer-input ones (`Zvvxi4/8{bf16,fp16,fp32,fp64}mm` and their `Zvvxni*` forms) require `Zve32f` too, although `tbl-mx-extensions` names no dependency for them: they accumulate into a floating-point C, read `frm`, and write `fflags` (AMB-06).
+  - 31 individual computational extensions, one per (input type, accumulator type) row in `tbl-extensions` (`Zvvi4i8mm` .. `Zvvi64mm`, `Zvvbf16mm` .. `Zvvfp64mm`, `Zvvofp4bf16mm` .. `Zvvofp8mm`). `Zvvmm` implies every integer individual extension and `Zvvfmm` implies every floating-point one, but only when that member's own dependency (`Zve32x`, `Zve64x`, `Zve32f`, or `Zve64d`) is also enabled: `Zvvfmm` on a hart without `Zve64d` does not enable the FP64-accumulator rows, and `Zvvmm` on a hart without `Zve64x` does not enable the Int64-accumulator rows. An extension implied this way does not appear in the ISA string unless its own config flag is also set to `true` (the same rule `Zvfhmin` already follows).
 - IME `vtype` high fields:
   - `vlambda` in bits `XLEN-2:XLEN-4`.
   - `vbs` in bit `XLEN-5`.
   - `altfmt_A` in bit `XLEN-6`.
   - `altfmt_B` in bit `XLEN-7`.
   - `altfmt` (Zvfbfa position) in bit 8: selects the C accumulator format (FP16/BF16 at `SEW=16`).
+  - On reset, and whenever `vtype.vill=1`, `vlambda`, `vbs`, `altfmt_A`, and `altfmt_B` read as cleared (S:866-868).
 - Lambda helper behavior:
   - Encodings map as `001=1`, `010=2`, `011=4`, `100=8`, `101=16`, `110=32`, `111=64`.
-  - `000` is treated as dynamic/preserve where appropriate and selects the largest supported legal lambda when a concrete vtype is written.
+  - A lambda value is permissible for a given `(VLEN, SEW)` when `EMUL_C = VLEN / (SEW * lambda^2)` is an integer in `{1, 2, 4, 8, 16}` (the "Selected lambda" rule, S:975-1003). The model supports every permissible lambda, so "permissible" and "supported" coincide (AMB-11). At `VLEN=256` the supported sets are `e8 -> {2,4}`, `e16 -> {1,2,4}`, `e32 -> {1,2}`, `e64 -> {1,2}`.
+  - Lambda write rules (`ime_select_vtype_lambda`): a write of `000` retains the current `vtype.lambda` if it is still supported for the new SEW, otherwise it selects the largest supported lambda; outside the IME-legal `(VLEN, SEW)` domain it selects `000`. A nonzero write retains the requested value if supported; otherwise it selects the largest supported value at most the request, or, if none is that small, the smallest supported value; outside the IME-legal domain it selects `000`.
+  - `vsetvli` and `vsetivli` carry no lambda request of their own (the field is outside the `vtypei` immediate), so they always pass `000` to the write rule above, which preserves `vtype.lambda` when it is still supported or reselects it otherwise. `vsetvl` passes `vtype.lambda` from `rs2` directly, so it can request any value, including `000`.
 - Vector configuration interaction:
-  - `vsetvli`/`vsetivli` preserve the existing IME fields while updating the standard vector fields. With IME enabled, `zimm[8]` writes `altfmt` (as in Zvfbfa); `zimm[10:9]` stay reserved.
-  - `vsetvl` accepts the full `vtype` value, including IME fields, and applies the lambda WARL selection helper.
+  - With an IME extension enabled, `zimm[8]` on `vsetvli`/`vsetivli` writes `altfmt` (as in Zvfbfa); `zimm[10:9]` stay reserved.
+  - `vsetvl` accepts the full `vtype` value, including every IME field, and applies the lambda write rule above.
 - Order-preserving tile load/store:
   - `vmtl.v` and `vmts.v` decode for `Zvvmtls`.
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
+  - The instruction-immediate lambda field, when nonzero, overrides `vtype.lambda`; `000` selects `vtype.lambda`. Either way the resulting lambda value must be permissible for the current `(VLEN, SEW)` (AMB-11); it is not WARL-clamped the way `vtype.lambda` itself is (S:2700-2713).
+  - `VL` shall be a multiple of `lambda * LMUL`, or the instruction raises illegal instruction (AMB-12); `VL=0` remains a legal no-op, since `0 % (lambda * LMUL) == 0`.
   - Register layout (both tile modes): tile element `i` lives at register-group element `ime_tile_reg_idx(i, LMUL, lambda, VLEN/SEW)`, the layout the matrix multiplies read. The mask bit is indexed by tile element `i`. Only active elements are written; prestart, inactive and tail elements stay undisturbed. Example `LMUL=2`, `lambda=2`, `VLEN/SEW=8`: tile elements `0..7` land at `[0,1,8,9,2,3,10,11]`.
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
   - A zero value in `rs2` (`x0` or any register holding 0) selects the natural leading dimension `LD = lambda * LMUL`.
-  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`); masked stores may read `v0`.
+  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`). A masked store with `vs3=v0` is legal (AMB-13): the IME spec restricts only masked loads (S:2711-2713), and the store path has no `valid_rd_mask` check.
 - Transposing tile load/store:
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
-  - Implemented for `SEW=8,16,32,64`, sharing the same mask, tail, prestart, `vstart`, and memory-exception behavior as `vmtl.v`/`vmts.v`.
+  - Implemented for `SEW=8,16,32,64`, sharing the same lambda, mask, tail, prestart, `vstart`, `VL` divisibility, and memory-exception behavior as `vmtl.v`/`vmts.v`.
   - The active storage-element tile shape is `cols = lambda * LMUL` columns by `rows = VL / cols` rows.
-  - `VL=0` is a legal no-op. Shortcut (both tile modes): `VL` not a multiple of `cols` is not checked; the partial trailing line is transferred, also for `VL < cols` (current spec traps; IME TG intends "largest multiple of `lambda * LMUL` that fits `VL`").
   - Uses the transposing memory address formula in `ime_tile_transposed_mem_off`: `mem_off = (i % cols) * LD + (i / cols)`. For a 2x2 tile with `LD=4` this yields offsets `[0,4,1,5]`, versus `[0,1,4,5]` for the order-preserving traversal.
   - A zero value in `rs2` selects the natural leading dimension `LD = VLEN / (SEW * lambda)`.
   - Transposing transposes `SEW`-bit storage elements only; it does not unpack, transpose, or repack `W>1` logical elements that may be packed inside a `SEW`-bit storage element.
   - Inactive/tail destination elements for `vmttl.v` remain undisturbed; inactive/tail elements for `vmtts.v` do not write memory or fault.
-- Basic non-widening integer matrix multiply-accumulate:
-  - `vmmacc.vv` decodes for `Zvvmm`.
-  - Implemented for W=1, `SEW=8,16,32,64`, integer LMUL `1,2,4,8` where the derived accumulator group is legal.
-  - `altfmt_A=0`/`altfmt_B=0` select signed operands; `altfmt_A=1`/`altfmt_B=1` select unsigned operands.
-  - Accumulation is written back modulo the destination SEW.
-- Generalized integer GEMM executor (`execute_ime_int_gemm`):
-  - `vmmacc.vv` now dispatches through this shared executor with widening factor `W=1`; the W=1 result is byte-for-byte identical to the previous dedicated path.
-  - Takes a `widening_factor W` argument and uses the specification-shaped geometry: `K_eff = lambda * W * LMUL`, `storage_K = lambda * LMUL`, `M = VLEN / (SEW * lambda)`, `N = VL / storage_K`, `N_max = M`, `EMUL_C = VLEN / (SEW * lambda^2)` based on the C accumulator SEW.
+- Generalized integer GEMM executor (`execute_ime_int_gemm`), shared by `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8):
+  - Takes a `widening_factor W` argument and uses the specification-shaped geometry: `K_eff = lambda * W * LMUL`, `storage_K = lambda * LMUL`, `M = VLEN / (SEW * lambda)`, `N = VL / storage_K`, `N_max = M`, `EMUL_C = VLEN / (SEW * lambda^2)`.
   - The physical storage geometry is the same for all `W`: each matrix row holds `storage_K = lambda * LMUL` `SEW`-bit storage elements along K, addressed via `mat_A_idx`/`mat_B_idx`/`mat_C_idx` (built on `tile_reg_idx`).
   - For `W>1` each `SEW`-bit storage element packs `W` logical input elements of width `EEW = SEW / W`. Logical index `k` maps to storage column `k / W` and lane `k % W` (`ime_packed_storage_col`/`ime_packed_lane`); `ime_packed_subelement_value` extracts the lane in little-endian lane order and sign- or zero-extends it per `altfmt_A/B`. Element `k` occupies bits `[k*EEW + EEW-1 : k*EEW]`, including the sub-byte Int4 (`EEW=4`) nibble packing (even element = lower nibble, odd element = upper nibble).
-  - Legality checks: `W in {1,2,4,8}`, `SEW % W == 0`, `EEW = SEW/W` a supported integer logical width (`{4,8,16,32,64}`), and `VL % K_eff == 0`, in addition to the existing `M`/`N`/`N_max`/`EMUL_C`/register-group checks.
-  - `EMUL_C` may be 1, 2, 4, 8 or 16 (`ime_group_size_legal`). `EMUL_C=16` occurs, for example, at `VLEN=256`, `SEW=16`, `lambda=1`; `vd` is then `v0` or `v16`. `read_single_element`/`write_single_element` accept at most 8 registers (max LMUL), so C is accessed through `read_single_element_in_group`/`write_single_element_in_group` with a limit of `IME_EMUL_C_MAX` (16). The FP rows use the same accessors.
-  - `VL=0` is a legal no-op (`N=0`), as in the FP rows and in the specification's `decode_gemm_geometry`, where `0 % vl_div == 0` passes.
+  - Legality checks: `W in {1,2,4,8}`, `SEW % W == 0`, `EEW = SEW/W` a supported integer logical width (`{4,8,16,32,64}`), `VL` a multiple of `storage_K = lambda * LMUL` (not the widened `K_eff = lambda * W * LMUL`: `VL` is counted in storage-width elements, matching `decode_gemm_geometry`'s `vl_div = lambda * LMUL`, S:4884-4911), and the existing `M`/`N`/`N_max`/`EMUL_C`/register-group checks.
+  - `EMUL_C` may be 1, 2, 4, 8 or 16 (`ime_group_size_legal`). `EMUL_C=16` occurs, for example, at `VLEN=256`, `SEW=16`, `lambda=1`; `vd` is then `v0` or `v16`. `read_single_element`/`write_single_element` accept at most 8 registers (max LMUL), so C is accessed through `read_single_element_in_group`/`write_single_element_in_group` with a limit of `IME_EMUL_C_MAX` (16, defined in `ime_types.sail`). The FP rows use the same accessors.
+  - `VL=0` is a legal no-op (`N=0`).
+  - `vd` shall not overlap `vs1` or `vs2` (`ime_reg_groups_disjoint`), regardless of `VL`, including `VL=0` (S:551-559). `vs1` and `vs2` may overlap each other (S:561-564).
   - Accumulation stays modulo `2^SEW`; C read/write indexing stays on `SEW` storage elements.
-  - `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) are now enabled and dispatch through this executor.
-- Double-widening integer matrix multiply-accumulate (`vwmmacc.vv`, W=2):
-  - Decodes for `Zvvmm` at funct6 `0x39`, OPIVV, `vm=1`. `vm=0` is `vfwimmacc.vv` (see "Microscaling (MX) loop").
-  - Shares `execute_ime_int_mmacc(W, ...)` with `vmmacc.vv`; only the widening factor differs (`W=1` vs `W=2`).
-  - Supported W=2 rows (all representable with the current packed-subelement helper, including the sub-byte nibble Int4 row): Int4→Int8 (`SEW=8`), Int8→Int16 (`SEW=16`), Int16→Int32 (`SEW=32`), Int32→Int64 (`SEW=64`). Each `SEW`-bit storage element packs two `SEW/2`-bit logical inputs.
-  - Signedness per operand follows `altfmt_A`/`altfmt_B` (0=signed, 1=unsigned); mixed-sign combinations are supported.
-- Quad-widening integer matrix multiply-accumulate (`vqmmacc.vv`, W=4):
-  - Decodes for `Zvvmm` at funct6 `0x3a`, OPIVV, `vm=1`. `vm=0` is `vfqimmacc.vv` (see "Microscaling (MX) loop").
-  - Shares `execute_ime_int_mmacc(W, ...)` with `vmmacc.vv`/`vwmmacc.vv`; only the widening factor differs (`W=4`).
-  - Supported W=4 rows: Int4→Int16 (`SEW=16`), Int8→Int32 (`SEW=32`, the common `vqwmmacc`/Ozaki-style path), and Int16→Int64 (`SEW=64`). Each `SEW`-bit storage element packs four `SEW/4`-bit logical inputs. `SEW=8` (which would imply the reserved `EEW=2`) raises illegal instruction via the `ime_int_eew_supported` check, matching the spec. The Int4→Int16 row uses the same packed-nibble helper as the W=2 Int4 row, so it is fully implemented and tested with no Int4 limitation.
-  - Signedness per operand follows `altfmt_A`/`altfmt_B` (0=signed, 1=unsigned); all four combinations (signed/signed, unsigned/signed, unsigned/unsigned, signed/unsigned) are covered by the tests.
-- Octuple-widening integer matrix multiply-accumulate (`v8wmmacc.vv`, W=8):
-  - Decodes for `Zvvmm` at funct6 `0x3b`, OPIVV, `vm=1`. `vm=0` is `vf8wimmacc.vv` (see "Microscaling (MX) loop").
-  - Shares `execute_ime_int_mmacc(W, ...)` with the other unscaled integer GEMM instructions; only the widening factor differs (`W=8`).
-  - Supported W=8 rows: Int4→Int32 (`SEW=32`) and Int8→Int64 (`SEW=64`). `SEW=8`/`SEW=16` imply reserved EEW values and raise illegal instruction via the shared EEW legality check.
-  - The targeted tests cover signed and mixed-sign paths, including an `LMUL=2` case to exercise `K_eff = lambda * W * LMUL` with `storage_K = lambda * LMUL`.
-- Staged unscaled floating-point matrix multiply-accumulate:
-  - `vfmmacc.vv` (W=1) decodes for `Zvvfmm` at funct6 `0x14`, OPFVV, `vm=1`; `vm=0` remains the reserved microscaled form and raises illegal instruction.
-  - Same-width default IEEE rows are implemented for FP16, FP32, and FP64.
-  - `vfwmmacc.vv` (W=2, funct6 `0x15`) is implemented for FP16/BF16→FP32 and FP32→FP64; BF16 inputs are selected per operand with `altfmt_A/B=1`.
-  - `vfqmmacc.vv` (W=4, funct6 `0x16`) is implemented for FP16/BF16→FP64.
-  - `vf8wmmacc.vv` (W=8, funct6 `0x17`) is implemented for OFP4 E2M1→FP32 (`SEW=32`, `altfmt_A=altfmt_B=0`) and OFP8 E4M3/E5M2→FP64 (`SEW=64`, per-operand `altfmt_A/B`, mixed allowed). `SEW<32` and `altfmt_A/B=1` at `SEW=32` raise illegal instruction. OFP inputs decode exactly to the C format (no flags); OFP8 has no signaling NaN, so E4M3/E5M2 NaNs decode to the canonical NaN.
-  - All FP rows run on the exact engine of the MX loop with the disclosed profile `G=1`, `psm=0`, `rnd=frm` (one rounding of each group's exact `W`-product sum, one rounding of the addition into C) and accrue active-lane `fflags`.
+  - Each row is gated by the individual extension that `tbl-int-encoding-map` names for that `(W, SEW)` cell (`ime_int_row_ok`); `altfmt_A`/`altfmt_B` select signed or unsigned interpretation and do not change which extension a row needs.
+  - `vmmacc.vv` (W=1): Int8/Int16/Int32/Int64. `altfmt_A=0`/`altfmt_B=0` selects signed operands; `altfmt_A=1`/`altfmt_B=1` selects unsigned operands.
+  - `vwmmacc.vv` (W=2): Int4->Int8, Int8->Int16, Int16->Int32, Int32->Int64; mixed-sign combinations supported.
+  - `vqmmacc.vv` (W=4): Int4->Int16, Int8->Int32 (the common `vqwmmacc`/Ozaki-style path), Int16->Int64; `SEW=8` (which would imply the reserved `EEW=2`) raises illegal instruction.
+  - `v8wmmacc.vv` (W=8): Int4->Int32, Int8->Int64; `SEW=8`/`SEW=16` imply reserved EEW values and raise illegal instruction.
+  - `vd` overlap, `VL` divisibility, and `vstart` legality are common to all four; `vstart` is `VSTART_MANDATORY` (any nonzero value raises illegal instruction, AMB-14), checked via `illegal_vstart(VSTART_MANDATORY, ...)` with operand A's LMUL-aligned geometry. 64-bit accumulator rows additionally require `Zve64x` through their own extension's dependency chain (AMB-15).
+  - `vm=0` is reserved for all four unscaled forms: `vmmacc.vv`/`vwmmacc.vv`/`vqmmacc.vv`/`v8wmmacc.vv` with `vm=0` are the MX integer-input forms (see "Microscaling (MX) loop"); for `vmmacc.vv` specifically, `vm=0` stays reserved (no MX form exists for `W=1`), but the assembly mapping still prints it with a `, v0.scale` suffix, matching the `vm=0` MX forms, since execution still traps.
+- Unscaled floating-point matrix multiply-accumulate (`execute_ime_fp_engine`, `vm=1`), shared by `vfmmacc.vv` (W=1, funct6 `0x14`), `vfwmmacc.vv` (W=2, funct6 `0x15`), `vfqmmacc.vv` (W=4, funct6 `0x16`), and `vf8wmmacc.vv` (W=8, funct6 `0x17`):
+  - `vfmmacc.vv` (`SEW=16`): FP16xFP16->FP16 and BF16xBF16->BF16 are legal; FP16xFP16->BF16 and BF16xBF16->FP16 are reserved (the C format shall match the input format when both inputs match). A mixed FP16/BF16 input pair is legal into either C format and needs both `Zvvfp16mm` and `Zvvbf16mm` enabled. `SEW=32`/`SEW=64`: FP32/FP64 inputs ignore `altfmt_A`/`altfmt_B` (S:1127, S:1490-1494).
+  - `vfwmmacc.vv`: OFP8->FP16/BF16 (`SEW=16`), FP16/BF16->FP32 with the C format fixed at FP32 (`SEW=32`), FP32->FP64 with `altfmt_A`/`altfmt_B` ignored (`SEW=64`).
+  - `vfqmmacc.vv`: OFP4->FP16/BF16 (`SEW=16`), OFP8->FP32 (`SEW=32`), FP16/BF16->FP64 with the C format fixed at FP64 (`SEW=64`).
+  - `vf8wmmacc.vv`: OFP4 E2M1->FP32 (`SEW=32`, `altfmt_A=altfmt_B=0`), OFP8 E4M3/E5M2->FP64 (`SEW=64`, per-operand `altfmt_A/B`, mixed allowed). `SEW<32` raises illegal instruction, as does `altfmt_A/B=1` at `SEW=32`.
+  - OFP4/OFP8 inputs ignore `altfmt_A`/`altfmt_B` for extension selection (any E4M3/E5M2 mix is legal where OFP8 is an input); OFP4 additionally requires `altfmt_A=altfmt_B=0` (AMB-05). OFP8 has no signaling NaN: E4M3/E5M2 NaN encodings decode to the canonical NaN without raising NV (AMB-04).
+  - Each row is gated by the individual extension(s) `tbl-fp-encoding-map` names for that `(W, SEW, altfmt_A, altfmt_B, altfmt)` combination; a mixed FP16/BF16 row needs both the FP16 and BF16 extensions for that accumulator width.
+  - `vd` overlap, `vstart` legality (`VSTART_MANDATORY`), `frm` legality, and geometry checks are shared with the integer path via `ime_gemm_groups_ok`/`ime_gemm_geometry`.
+  - `Zvvfmm` requires `Zve32f` (which requires `Ext_F`, bringing the `mstatus.FS` check into the IME decode path for the first time); FP64-accumulator rows additionally require `Zve64d` through their own extension's dependency chain.
+  - `vm=0` is reserved for all four unscaled forms the same way as the integer path: `vfmmacc.vv` `vm=0` stays reserved (prints with the `, v0.scale` suffix, still traps); the other three dispatch to the MX forms (see below).
+  - Runs on the exact engine described in "Microscaling (MX) loop" with the disclosed profile `G=1`, `psm=0`, `rnd=frm`, and accrues `fflags` once per active C element, even when the accrued value is zero (base-V convention: `fflags_dirty_policy` relies on one `accrue_fflags` call per element to mark `mstatus.FS`/`SD` dirty, independent of the flags it carries).
+
+## Known gaps
+
+- The disclosed FP group profile is fixed at `G=1`, `psm=0` (exact partial sums), `rnd=frm`; no other disclosure profile is implemented.
+- C tile tail elements of the multiply-accumulate instructions are always left undisturbed; the model never reads `vta` in the GEMM paths. The specification permits this: `vta=0` requires it, and `vta=1` permits (but does not require) retaining the pre-instruction value instead of writing an all-ones `SEW`-bit pattern (S:2955-2977). The model never exercises the all-ones alternative `vta=1` also allows. This is unrelated to tile load/store, where the specification itself says the `vta`/`vma` fill policies do not apply and inactive/tail destination elements are always undisturbed (S:2675, S:2797) — the model already matches that mandatory behavior.
+- The first-party test matrix targets RV64 with `VLEN=256` only; other `VLEN`/`XLEN` combinations are untested.
+- OFP8 accumulator rows (`vfwmmacc.vv` at `SEW=8`, and the `Zvvxofp4ofp8mm`/`Zvvxnofp4ofp8mm` microscaling extensions) are not implemented: the specification does not define OFP8 accumulator overflow, and E4M3 has no infinity encoding to overflow to (AMB-03). These rows and extensions decode but raise illegal instruction at execution.
+
+A fuller list of spec ambiguities and the interpretation chosen for each is tracked as the GitHub issue "IME: spec ambiguities and the interpretation chosen in ime-latest-spec" in `Openchip-Software/sail-riscv`.
 
 ## Targeted tests
 
-The initial IME tests live under `test/first_party/src/`:
+The IME tests live under `test/first_party/src/`, registered with `add_ime_test(...)` in `test/first_party/CMakeLists.txt`; that file is the current list of test sources, march/xlen, and config-override JSON, and grows as rows are added, so it is the source of truth rather than any count given here.
 
 - `test_ime_tile_ls.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, and `LD=4`.
@@ -92,129 +98,81 @@ The initial IME tests live under `test/first_party/src/`:
   - Subcase 2 checks `rs2=x0` natural `LD = VLEN / (SEW * lambda) = 4` (not the ordered `lambda * LMUL = 2`).
 - `test_ime_tile_ls_vl.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `LD=2`, `VLEN=256`.
-  - Checks `VL=3` and `VL=4` do not trap, and `VL=0`/`VL=1` `vmttl.v`/`vmtts.v` do not trap.
+  - Checks `VL` values that are and are not multiples of `lambda * LMUL` trap accordingly, and `VL=0` does not trap.
 - `test_ime_tile_ls_v0.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=1`, `VL=4`, `LD=4`, `VLEN=256`.
   - Checks masked `vmtl.v`/`vmttl.v` into `v0` trap; masked `vmtl.v` into `v8` and masked `vmts.v`/`vmtts.v` from `v0` do not.
 - `test_ime_tile_ls_ld0.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=8`, `VLEN=256`, `rs2=a1` holding 0.
   - Checks all four tile loads/stores use the natural `LD` (2 order-preserving, 4 transposing).
+- `test_ime_vtype_lambda.S`
+  - Configures `VLEN=256`.
+  - Checks the lambda write rules: a `vsetvl` request outside the permissible set clamps to the largest supported value at most the request (`e16` lambda=8 request reads back 4; `e32` lambda=8 request reads back 2), and a following `vsetvli` (lambda field forced to `000`) retains the current lambda when it is still supported for the new SEW.
+- `test_ime_vtype_altfmt.S`
+  - Checks `altfmt` (bit 8) via `vsetvli`, `vsetivli`, and `vsetvl`, and that `zimm[9]` stays reserved.
 - `test_ime_vmmacc.S`
   - Configures `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`.
   - Checks a signed 4x2 by 2x2 non-widening GEMM and verifies inactive C tile columns remain untouched.
 - `test_ime_vwmmacc.S`
   - Exercises all four W=2 widening rows at `VLEN=256`, `LMUL=1`:
-    - Row A Int16→Int32 (`SEW=32`, `lambda=2`, `VL=4`), signed/signed, plus a tail-stays-zero check.
-    - Row B Int8→Int16 (`SEW=16`, `lambda=4`, `VL=4`), mixed-sign (`altfmt_A=0` signed, `altfmt_B=1` unsigned with a packed 200).
-    - Row C Int32→Int64 (`SEW=64`, `lambda=2`, `VL=4`), unsigned/unsigned with a packed `0x80000001` to exercise the unsigned high bit.
-    - Row D Int4→Int8 (`SEW=8`, `lambda=4`, `VL=4`), signed/signed, exercising packed 4-bit nibble lanes.
+    - Row A Int16->Int32 (`SEW=32`, `lambda=2`, `VL=4`), signed/signed, plus a tail-stays-zero check.
+    - Row B Int8->Int16 (`SEW=16`, `lambda=4`, `VL=4`), mixed-sign (`altfmt_A=0` signed, `altfmt_B=1` unsigned with a packed 200).
+    - Row C Int32->Int64 (`SEW=64`, `lambda=2`, `VL=4`), unsigned/unsigned with a packed `0x80000001` to exercise the unsigned high bit.
+    - Row D Int4->Int8 (`SEW=8`, `lambda=4`, `VL=4`), signed/signed, exercising packed 4-bit nibble lanes.
   - Expected C constants are produced by a scalar reference mirroring the `int_gemm` helper.
 - `test_ime_vqmmacc.S`
-  - Exercises the three valid W=4 widening rows at `VLEN=256`, `lambda=2`, `LMUL=1`, encoded as `.word 0xeac40857` (`vqmmacc.vv v16, v8, v12`):
-    - Row A Int8→Int32 (`SEW=32`, `VL=4`), signed/signed, the priority `vqwmmacc`/Ozaki-style path, plus a tail-stays-zero check.
-    - Row B Int8→Int32 (`SEW=32`, `VL=4`), unsigned/signed (`altfmt_A=1`, `altfmt_B=0`) with a packed unsigned 200 (`0xC8`).
-    - Row C Int4→Int16 (`SEW=16`, `VL=2`), unsigned/unsigned (`altfmt_A=altfmt_B=1`), exercising packed 4-bit nibble lanes including values `>= 8`.
-    - Row D Int16→Int64 (`SEW=64`, `VL=4`), signed/unsigned (`altfmt_A=0`, `altfmt_B=1`) with a packed unsigned 32769 (`0x8001`).
+  - Exercises the three valid W=4 widening rows at `VLEN=256`, `lambda=2`, `LMUL=1`:
+    - Row A Int8->Int32 (`SEW=32`, `VL=4`), signed/signed, the priority `vqwmmacc`/Ozaki-style path, plus a tail-stays-zero check.
+    - Row B Int8->Int32 (`SEW=32`, `VL=4`), unsigned/signed (`altfmt_A=1`, `altfmt_B=0`) with a packed unsigned 200 (`0xC8`).
+    - Row C Int4->Int16 (`SEW=16`, `VL=2`), unsigned/unsigned (`altfmt_A=altfmt_B=1`), exercising packed 4-bit nibble lanes including values `>= 8`.
+    - Row D Int16->Int64 (`SEW=64`, `VL=4`), signed/unsigned (`altfmt_A=0`, `altfmt_B=1`) with a packed unsigned 32769 (`0x8001`).
   - Together the rows cover all four signedness combinations; expected C constants come from the same scalar reference mirroring the `int_gemm` helper.
 - `test_ime_v8wmmacc.S`
-  - Exercises the two valid W=8 widening rows at `VLEN=256`, encoded as `.word 0xeec40857` (`v8wmmacc.vv v16, v8, v12`):
-    - Rows A/B cover Int4→Int32 (`SEW=32`) signed/signed and unsigned/signed paths.
-    - Rows C/D cover Int8→Int64 (`SEW=64`) signed/signed and signed/unsigned paths, with Row D using `LMUL=2`.
+  - Exercises the two valid W=8 widening rows at `VLEN=256`:
+    - Rows A/B cover Int4->Int32 (`SEW=32`) signed/signed and unsigned/signed paths.
+    - Rows C/D cover Int8->Int64 (`SEW=64`) signed/signed and signed/unsigned paths, with Row D using `LMUL=2`.
   - Expected C constants come from a scalar reference mirroring the `int_gemm` helper.
 - `test_ime_vfmmacc.S`
-  - Exercises the staged unscaled FP rows at `VLEN=256`, using `.word` encodings for `vfmmacc.vv`, `vfwmmacc.vv`, and `vfqmmacc.vv`.
-  - Covers same-width FP16/FP32/FP64, `vfwmmacc` FP16→FP32, BF16→FP32, FP32→FP64, and `vfqmmacc` FP16/BF16→FP64 with exact values.
+  - Exercises the unscaled FP rows at `VLEN=256`, using `.word` encodings for `vfmmacc.vv`, `vfwmmacc.vv`, and `vfqmmacc.vv`.
+  - Covers same-width FP16/FP32/FP64, `vfwmmacc` FP16->FP32, BF16->FP32, FP32->FP64, and `vfqmmacc` FP16/BF16->FP64 with exact values.
   - Includes the FP32 inactive-column sentinel case that verifies inactive sNaNs do not update C or accrue `fflags`.
 - `test_ime_vf8wmmacc.S`
-  - `vf8wmmacc.vv v16, v8, v12` as `.word 0x5ec41857`, `VLEN=256`, `lambda=2`.
-  - E2M1→FP32 (`LMUL=1`, inactive C sentinels), E4M3×E4M3→FP64 (max normal, subnormal), E4M3×E5M2→FP64 with `LMUL=2` (E5M2 max and subnormal), and E5M2×E4M3 special values (`inf*0` → NaN + NV, OFP8 NaN → canonical NaN without flags).
+  - `vf8wmmacc.vv v16, v8, v12`, `VLEN=256`, `lambda=2`.
+  - E2M1->FP32 (`LMUL=1`, inactive C sentinels), E4M3xE4M3->FP64 (max normal, subnormal), E4M3xE5M2->FP64 with `LMUL=2` (E5M2 max and subnormal), and E5M2xE4M3 special values (`inf*0` -> NaN + NV, OFP8 NaN -> canonical NaN without flags).
   - Illegal: `vm=0`, `SEW=16`, `SEW=32` with `altfmt_A=1`, `vstart!=0`.
-- `test/first_party/src/ime_override.json`
-  - Enables `Zvvmm`, `Zvvmtls`, `Zvvmttls`, and `Zvvfmm` for the targeted first-party tests.
-- `model/unit_tests/test_ime_vtype.sail`
-  - Covers lambda encoding helpers, lambda WARL selection, and the addressability of the new high `vtype` fields.
 - `test_ime_emul_c16.S`
   - `VLEN=256`, `SEW=16`, `LMUL=1`, `lambda=1`: `M=16`, `EMUL_C=16`, C in `v16`-`v31`, column `j` in `v16 + j`.
   - `vmmacc.vv` and FP16 `vfmmacc.vv` with `VL=16` check all 256 C elements. `VL=0` does not trap, and `vmmacc.vv` leaves C unchanged. `vd=v8` raises illegal instruction.
+- `test_ime_fs_off.S`
+  - Forces `mstatus.FS=Off` after `crt0` sets it, at `SEW=32`, `lambda=2`, `LMUL=1`.
+  - `vfmmacc.vv` raises illegal instruction (`Zvvfmm` requires `Zve32f`, hence `Ext_F`'s `mstatus.FS` check); `vmmacc.vv` still executes (`Zvvmm` requires only `Zve32x`, which has no `Ext_F`/FS dependency).
+- `test/first_party/src/ime_override.json`
+  - Enables `Zvvmm`, `Zvvmtls`, `Zvvmttls`, and `Zvvfmm` for the targeted first-party tests; by implication, this also enables every individual computational extension whose own dependency the default config satisfies.
+- `model/unit_tests/test_ime_vtype.sail`
+  - Covers lambda encoding helpers, lambda WARL selection, and the addressability of the new high `vtype` fields.
 - `model/unit_tests/test_ime_gemm.sail`
   - `ime_gemm_geometry` and `vd` alignment at `EMUL_C=16`.
   - `read_single_element_in_group`/`write_single_element_in_group` with a 16-register limit reach `v24` and `v31` from `vd=v16`.
   - `execute_ime_int_gemm` and `ime_fp_gemm` across the full 16-register C group, and `execute_ime_int_gemm` with `VL=0` leaving C unchanged.
+- `model/unit_tests/test_ime_asm.sail`
+  - Checks `vmmacc.vv`/`vfmmacc.vv` assembly for `vm=1` and for the reserved `vm=0` encoding, which prints the `, v0.scale` suffix.
+
+The microscaling-specific tests (`test_ime_mx_*.S`, `test_ime_fp_rows.S`, generated by `ime_mx_gen.py`) are described in "Microscaling (MX) loop".
 
 ## How to run the targeted IME checks
 
-From the repository root:
+The IME test targets follow the naming `build_${arch}_${test_source}` and `first_party_${arch}_${test_source}`, one pair per `add_ime_test(...)` entry in `test/first_party/CMakeLists.txt`; `${arch}` is `rv64d` for every current entry. From a configured build directory:
 
 ```sh
-cmake --build build --target generated_sail_riscv_model sail_riscv_sim build_rv64d_test_ime_v8wmmacc.S build_rv64d_test_ime_vqmmacc.S build_rv64d_test_ime_vwmmacc.S build_rv64d_test_ime_vfmmacc.S build_rv64d_test_ime_vf8wmmacc.S build_rv64d_test_ime_transpose_tile_ls.S build_rv64d_test_ime_tile_ls.S build_rv64d_test_ime_vmmacc.S -j$(nproc)
-ctest --test-dir build -R 'first_party_rv64d_test_ime_(v8wmmacc|vqmmacc|vwmmacc|vfmmacc|vf8wmmacc|transpose_tile_ls|tile_ls|vmmacc)\.S' --output-on-failure -V
+cmake --build build -j$(nproc)
+ctest --test-dir build -R 'first_party_rv64d_test_ime_' --output-on-failure
 ```
 
-These commands assume the build directory has already been configured and that the local Sail and RISC-V first-party test toolchain prerequisites are available. The simulator runs the IME tests with:
+This assumes `FIRST_PARTY_TESTS` was enabled at configure time and the RISC-V cross-compiler prerequisites (Clang or GCC) are on `PATH`. The simulator runs each IME test with:
 
 ```text
---enable-experimental-extensions --config build/config/rv64d_v256_e64.json --config-override test/first_party/src/ime_override.json
+--enable-experimental-extensions --config build/config/rv64d_v256_e64.json --config-override test/first_party/src/<the test's own override JSON>
 ```
-
-Latest targeted verification (`ctest -R test_ime_`) completed with all ten IME tests passing:
-
-```text
-100% tests passed, 0 tests failed out of 10
-```
-
-## Known limitations and shortcuts
-
-- Both the order-preserving and transposing tile load/store modes are implemented; the remaining reserved tile modes (`10`, `11`) decode to illegal instruction. Transposing only transposes `SEW`-bit storage elements and is exercised for `SEW=32` at `LMUL=1`, `lambda=2`, `VL=4` and `LMUL=2`, `lambda=2`, `VL=16`; other SEW values are not yet tested.
-- The `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8) integer instruction encodings are enabled. The unscaled floating-point matrix loop now covers same-width `vfmmacc.vv` for FP16/FP32/FP64, `vfwmmacc.vv` for FP16/BF16→FP32 and FP32→FP64, `vfqmmacc.vv` for FP16/BF16→FP64, and `vf8wmmacc.vv` for E2M1→FP32 and E4M3/E5M2→FP64. Microscaling is described in "Microscaling (MX) loop". No Int4 limitation: the packed-subelement helper represents 4-bit nibble lanes, so the Int4 rows for W=2, W=4, and W=8 are implemented and tested.
-- `vmmacc.vv`, `vwmmacc.vv`, `vqmmacc.vv`, and `v8wmmacc.vv` require `vm=1` and `vstart=0` as in the draft restriction used for this loop; masked matrix multiply is not implemented. Their `vm=0` encodings are the MX forms (`vmmacc.vv` `vm=0` stays reserved).
-- Integer row/subextension legality is simplified: enabling `Zvvmm` enables the initial non-widening integer rows implemented here instead of modeling each fine-grained row as a separate configuration flag.
-- C tile-tail columns are left undisturbed by the integer GEMM implementation; this matches the targeted tests and should be revisited if the final spec requires tail-agnostic updates for inactive physical columns.
-- The first-party tests use `.word` instruction encodings for the new IME instructions so they do not depend on external assembler mnemonic support.
-- The implementation is still a targeted first loop, not a full conformance suite for all legal lambdas, LMULs, element widths, masking, traps, and exception restart behavior.
-
-## Floating-point vmmacc loop
-
-The current implementation adds unscaled floating-point matrix multiply-accumulate in the same staged style as the integer work. It follows the draft spec's Sail-like starting point for `fp_gemm`, but remains narrower than the full draft matrix.
-
-Initial disclosure for implemented unscaled FP rows:
-
-- Grouping: `G=1`.
-- Partial-sum mode: `psm=0`, exact group sums (see the MX loop).
-- Group rounding: `rnd=frm`.
-- Microscaling (`v0.scale`/`vbs`) and the `altfmt` C format are implemented by the MX loop below, which also executes the rows listed here.
-
-Implemented pieces:
-
-1. Shared decode/execute path for unscaled `vfmmacc.vv`, `vfwmmacc.vv`, and `vfqmmacc.vv` under `Ext_Zvvfmm`:
-   - requires `vm=1` and `vstart=0`;
-   - rejects unsupported `SEW`, `W`, and alternate input/output format combinations explicitly;
-   - reuses `ime_mat_A_idx`, `ime_mat_B_idx`, `ime_mat_C_idx`, `ime_group_size_to_pow`, and active-column `VL/(lambda*LMUL)` geometry from the integer path;
-   - uses dynamic `frm`; reserved `frm` is rejected by `valid_fp_op`;
-   - ORs returned exception flags into `fflags` with `accrue_fflags` only for active output computations.
-2. Same-width `vfmmacc.vv` rows for FP16, FP32, and FP64 (`W=1`, `altfmt_A=altfmt_B=0`, default IEEE C).
-3. `vfwmmacc.vv` rows for FP16→FP32, BF16→FP32 (`altfmt_A/B=1` for BF16 inputs; mixed FP16/BF16 follows the same per-operand conversion path), and FP32→FP64.
-4. `vfqmmacc.vv` rows for FP16/BF16→FP64.
-5. `vf8wmmacc.vv` rows for OFP4 E2M1→FP32 and OFP8 E4M3/E5M2 (incl. mixed)→FP64.
-
-Still deferred:
-
-- OFP8/OFP4 inputs for `vfmmacc`/`vfwmmacc`/`vfqmmacc` (W<8), non-default C accumulator `altfmt`, round-to-odd group rounding, disclosed `psm=1`, microscaling (`v0.scale`/`vbs`), integer-input FP-accumulate forms, and fine-grained per-format extension gating.
-
-Test requirements for the FP loop:
-
-- First-party assembly tests should continue to use `.word` encodings until assembler mnemonic support exists.
-- FP32 W=1 smoke test: `SEW=32`, `LMUL=1`, `lambda=2`, `VL=4`, `VLEN=256`; verify a 4x2 by 2x2 exact matrix multiply-add and confirm inactive C tile columns remain unchanged.
-- Limited-vector-length test: set `VL=lambda*LMUL` so only one C/B column is active; place flag-generating sentinel values in inactive columns and verify they do not affect C or `fflags`.
-- Multiple-LMUL test: exercise `LMUL=2` with exact values to prove `K_eff=lambda*LMUL` and register-step traversal.
-- Rounding tests: after confirming the disclosure (`G=1`, `psm=0`, `rnd=frm`) with the user, add RNE plus at least one directed mode such as RTZ/RDN and check result bits and `NX`.
-- Special-value tests: sNaN invalid, `0*inf` invalid, qNaN/default-NaN behavior, and inactive/tail non-participation. The FP32 limited-VL test already checks inactive sNaNs do not affect `fflags`; broaden this to the newer FP16/BF16/FP64 rows.
-- Illegal/reserved tests: `vm=0` for `vfmmacc`, nonzero `vstart`, bad `VL` divisibility, misaligned register groups, unsupported alternate formats, `vfqmmacc` with `SEW=8`, and `vf8wmmacc` with `SEW<32`.
-
-Open questions before broadening scope:
-
-1. Whether to add the draft spec's separate C `altfmt` vtype bit now or keep this local model to default C formats until the vtype layout is settled.
-2. Whether `G=1, psm=0, rnd=frm` is the desired architectural disclosure for the initial reference implementation, or whether a fused/`rnd=xct` profile is preferred.
-3. Whether `Zvvfmm` should remain the coarse gate for all default IEEE FP rows in this repo or be replaced with fine-grained draft row extensions before lower-precision rows are enabled.
 
 ## Microscaling (MX) loop
 
@@ -231,36 +189,28 @@ ime_fp.sail         exact values (unbounded ints) + IEEE rounding with RISC-V fl
 ```
 
 - Engine (`ime_fp.sail`): decodes E2M1, E4M3, E5M2, FP16, BF16, FP32, and FP64 to an exact value; exact multiply/add; correctly rounded conversion to FP16/BF16/FP32/FP64 under `frm` with `NX/UF/OF/NV` (tininess after rounding). `model/unit_tests/test_ime_fp.sail` cross-checks engine add/mul against SoftFloat (3000 FP16/FP32/FP64 cases, all five rounding modes, bits and flags).
-- Disclosure for every FP row (`vm=1` and `vm=0`): `G=1`, `psm=0`, `rnd=frm`. Per group, the `W` products are summed exactly, multiplied exactly by the E8M0 scale pair `2^(eA+eB-254)` (`vm=0`), rounded once to C, and added to C (rounded once more). Integer MX: the exact block dot product is scaled exactly, rounded once, and added.
+- Disclosure for every FP row (`vm=1` and `vm=0`): `G=1`, `psm=0`, `rnd=frm`. Per group, the `W` products are summed exactly (the sum seeds from the first product rather than a literal `+0`, so a single-term group keeps that product's sign exactly, including `-0`, matching the IEEE 754 sum-of-zeros rule for multi-term groups too, AMB-02). The group sum is rounded once to the C format. For `vm=0`, each E8M0 scale is separately converted to the C format under `frm` (a rounding point of its own, which can itself become an actual zero or infinity), the two converted scales are multiplied in the C format to form the block scale, and that block scale multiplies the already-rounded group sum (S:1958-2027, S:5097-5124, read_block_scales/fp_scaled_gemm pseudocode order, AMB-01). The scaled or unscaled, rounded term is then added into C, rounded once more. A block scale that evaluates to NaN (either encoded E8M0 value is `0xFF`, or the two converted scales multiply to NaN, for example `+0 * +inf`) makes C[i,j] the canonical NaN and ends that element's evaluation; later blocks are skipped. Integer MX: the exact block dot product is converted to the C format under `frm` (`int_to_fp`, a rounding point of its own), multiplied by the block scale in the C format, and added to C.
 - Rows, all with `vm=0` at BS=32 (`bs=0`) and BS=16 (`bs=1`):
-  - `vfwmmacc.vv` `SEW=16`: OFP8 (all E4M3/E5M2 A/B pairs) → FP16/BF16; also `vm=1`.
-  - `vfqmmacc.vv` `SEW=16`: E2M1 → FP16/BF16; `SEW=32`: OFP8 → FP32; also `vm=1`.
-  - `vf8wmmacc.vv` `SEW=32`: E2M1 → FP32; `SEW=64`: OFP8 → FP64; also `vm=1`.
-  - The older unscaled rows (`vfmmacc` FP16/FP32/FP64, `vfwmmacc` FP16/BF16→FP32 and FP32→FP64, `vfqmmacc` FP16/BF16→FP64) use the same engine.
-  - `vfwimmacc.vv` `SEW=16`: MXINT8 → FP16/BF16. `vfqimmacc.vv` `SEW=16`: MXINT4 → FP16/BF16; `SEW=32`: MXINT8 → FP32. `vf8wimmacc.vv` `SEW=32`: MXINT4 → FP32; `SEW=64`: MXINT8 → FP64.
-- Legality: geometry per `decode_gemm_geometry` (`EMUL_C` up to 16), `vstart=0`, valid `frm`, `SEW*lambda >= 16`, BS=16 requires `W*LMUL <= SEW`, no operand group may overlap `v0`, and the encoding-map cell must name an enabled extension.
-- Extension gating: a `vm=0` cell needs its `Zvvx*` (BS=32; also satisfied by `Zvvxn*`) or `Zvvxn*` (BS=16). A `vm=1` engine row needs `Zvvfmm` or an MX extension that implies it. The FP MMA opcodes decode when `Zvvfmm` or any FP MX extension is enabled; the integer ones when `Zvvmm` or any integer MX extension is enabled.
+  - `vfwmmacc.vv` `SEW=16`: OFP8 (all E4M3/E5M2 A/B pairs) -> FP16/BF16; also `vm=1`.
+  - `vfqmmacc.vv` `SEW=16`: E2M1 -> FP16/BF16; `SEW=32`: OFP8 -> FP32; also `vm=1`.
+  - `vf8wmmacc.vv` `SEW=32`: E2M1 -> FP32; `SEW=64`: OFP8 -> FP64; also `vm=1`.
+  - The unscaled rows (`vfmmacc` FP16/FP32/FP64, `vfwmmacc` FP16/BF16->FP32 and FP32->FP64, `vfqmmacc` FP16/BF16->FP64) use the same engine.
+  - `vfwimmacc.vv` `SEW=16`: MXINT8 -> FP16/BF16. `vfqimmacc.vv` `SEW=16`: MXINT4 -> FP16/BF16; `SEW=32`: MXINT8 -> FP32. `vf8wimmacc.vv` `SEW=32`: MXINT4 -> FP32; `SEW=64`: MXINT8 -> FP64.
+- Legality: geometry per `decode_gemm_geometry` (`EMUL_C` up to 16), `vstart` is `VSTART_MANDATORY`, valid `frm`, `SEW*lambda >= 16`, BS=16 requires `W*LMUL <= SEW`, no operand group may overlap `v0`, and the encoding-map cell must name an enabled extension.
+- Extension gating: a `vm=0` cell needs its `Zvvx*` (BS=32; also satisfied by `Zvvxn*`) or `Zvvxn*` (BS=16). A `vm=1` engine row needs the individual extension(s) `tbl-fp-encoding-map`/`tbl-int-encoding-map` name for that cell, or an MX extension that implies it. The FP MMA opcodes decode when `Zvvfmm` or any FP MX extension is enabled; the integer ones when `Zvvmm` or any integer MX extension is enabled.
 - Tests (`test/first_party/src/test_ime_mx_*.S`) are generated by `ime_mx_gen.py`, an independent Python reference (exact `Fraction` arithmetic, self-checked against numpy rounding). Rerun it after changing data or cases: `python3 test/first_party/src/ime_mx_gen.py`.
   - `vfwmmacc`, `vfqmmacc`, `vf8wmmacc`, `vfwimmacc`, `vfqimmacc`, `vf8wimmacc`: every format combination listed above, `vm=1` (where new) and both block sizes, all five rounding modes, `K_eff=64` (2 or 4 blocks), one sNaN tail column.
-  - `special`: NaN scale with early termination (a later block would overflow), large and tiny scales leaving the C range, `inf*0`, BF16 scale overflow, a partial block (`K_eff=16`), NaN B scale, and two `exact-scale` cases where scaling the rounded sum would tie the other way (FP32 and FP16 subnormal results).
+  - `special`: 16 cases, including NaN scale with early termination (a later block would overflow), large and tiny scales leaving the C range (one rounding under round-towards-zero to the maximum finite value instead of to infinity), `inf*0`, BF16 scale overflow, a partial block (`K_eff=16`), NaN B scale, `+0 * +inf` from two individually finite converted scales, an integer dot product that overflows the C format in `int_to_fp` before scaling, two `round-before-scale` cases where rounding the group sum before scaling ties the other way than rounding the unrounded sum would (FP32 and integer), and a `-0` group sum from a single-term (`W=1`) group whose one product is exactly `-0`.
   - `illegal`: reserved rows, BS=16 `W*LMUL>SEW`, `v0` overlap, `vstart!=0`, bad `VL`, `frm=5`, `vmmacc`/`vfmmacc` `vm=0`, SEW=8 OFP8 C.
-  - `gate` (with `ime_mx_gate_override.json`): BS=32/BS=16 cells, implied base rows, and rows that stay illegal.
+  - `gate` (with `ime_mx_gate_override.json`): BS=32/BS=16 cells, implied base rows, an integer row and a floating-point row each enabled through their own individual extension alone (no family flag), and a mixed FP16/BF16 row that traps when only one of the two needed extensions is enabled.
   - `test_ime_vtype_altfmt.S`: `altfmt` via `vsetvli`/`vsetivli`/`vsetvl`.
-  - `test_ime_fp_rows.S` (with `ime_override.json`): the older unscaled rows, random data in all rounding modes, plus a `group-tie` case per `W>1` row where rounding each product into C separately would give a different result.
-- `ime_mx_override.json` enables all IME and MX extensions; `ime_override.json` stays without MX so the older `vm=0`-illegal checks keep their meaning.
-
-Shortcuts and open spec questions:
-
-- OFP4 → OFP8 accumulator rows (`vfwmmacc` `SEW=8`, `Zvvx[n]ofp4ofp8mm`) are deferred: the spec does not define OFP8 accumulator overflow (E4M3 has no infinity). They raise illegal instruction and have no extension flag.
-- Scales deviate from the specification text on purpose: `read_block_scales` converts `scale_A` and `scale_B` to the C format and rounds their product there, then `fp_scaled_gemm` multiplies the rounded group sum by it. The model instead multiplies the exact group sum by the exact `2^(eA+eB-254)` and rounds once. Scales therefore raise no flags of their own; range effects show up when the scaled sum is rounded.
-- The sign of an exact zero partial sum follows `frm` (`-0` only under RDN, or when all terms are `-0`).
-- Base FP rows keep the coarse `Zvvfmm` gate rather than fine-grained `Zvvo*` flags.
+  - `test_ime_fp_rows.S` (with `ime_override.json`): the unscaled rows, random data in all rounding modes, plus a `group-tie` case per `W>1` row where rounding each product into C separately would give a different result.
+- `ime_mx_override.json` enables all IME and MX extensions except the two unimplemented OFP8-accumulator ones; `ime_override.json` stays without MX so the older `vm=0`-illegal checks keep their meaning.
 
 ## Next-loop checklist
 
-1. Add rounding-sensitive tests for the disclosed `G=1`, `psm=0`, `rnd=frm` profile, including directed rounding modes and `NX` checks.
-2. Add explicit special-value tests for sNaN invalid, qNaN/default-NaN behavior, `0*inf`, and inactive/tail non-participation in the new FP16/BF16/FP64 rows.
-3. Decide whether to add the draft C `altfmt` field and fine-grained row/subextension legality before enabling non-default C/BF16 accumulator rows.
-4. Add OFP8/OFP4 rows for W<8, microscaling support, and associated `vtype.vbs` behavior only after unscaled default-format FP remains stable.
-5. Replace simplified row/subextension legality with the full extension implication/configuration table once the draft naming is settled.
-6. Expand tests across lambda/LMUL/SEW combinations, masked/tail behavior, reserved encodings, and trap/restart cases.
+1. Implement the OFP8 accumulator rows (`vfwmmacc` `SEW=8`, `Zvvx[n]ofp4ofp8mm`) once an overflow/rounding convention is agreed (see "Known gaps").
+2. Add a disclosure profile other than `G=1`, `psm=0`, `rnd=frm` if the architecture ends up requiring one to be implemented, and the matching tests.
+3. Expand the test matrix beyond RV64 `VLEN=256`: other `VLEN` values, RV32, and other `XLEN`/`ELEN` combinations.
+4. Exercise the `vta=1` all-ones tail alternative the specification permits, if a disclosure requires it, instead of the model's current always-undisturbed behavior.
+5. Broaden masked/tail and trap/restart coverage across lambda/LMUL/SEW combinations beyond what the targeted tests above already cover.
