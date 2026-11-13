@@ -338,11 +338,6 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
 // Encoding-map legality (tbl-fp-encoding-map, tbl-intmx-encoding-map).
 // ---------------------------------------------------------------------------
 
-// Base (vm=1) FP row: covered by the coarse Zvvfmm, or implied by its MX
-// extension at either block size (Zvvx* implies Zvvo*, Zvvxn* implies Zvvx*).
-function ime_fp_base_ext_ok(x : extension, xn : extension) -> bool =
-  currentlyEnabled(Ext_Zvvfmm) | currentlyEnabled(x) | currentlyEnabled(xn)
-
 // MX (vm=0) cell: BS=32 needs Zvvx* (or Zvvxn*, which implies it); BS=16
 // needs Zvvxn*.
 function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
@@ -350,40 +345,54 @@ function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
   then currentlyEnabled(x) | currentlyEnabled(xn)
   else currentlyEnabled(xn)
 
-// vm=1 legality per tbl-fp-encoding-map for the implemented rows. altfmt
-// selects the C format; OFP4 inputs require altfmt_A = altfmt_B = 0.
+// Which extension(s) an FP16/BF16-input row requires (tbl-fp-encoding-map):
+// matching inputs require only the extension for that input format; a
+// mixed FP16/BF16 input pair requires both extensions, whatever the C
+// format (S:7238-7239, "a cell that names more than one extension requires
+// all named extensions").
+function ime_fp16bf16_ext_ok(fp16_ext : extension, bf16_ext : extension,
+                             same_inputs : bool, bf16_in : bool) -> bool =
+  if same_inputs
+  then (if bf16_in then currentlyEnabled(bf16_ext) else currentlyEnabled(fp16_ext))
+  else currentlyEnabled(fp16_ext) & currentlyEnabled(bf16_ext)
+
+// vm=1 legality per tbl-fp-encoding-map for the implemented rows (the
+// SEW=8 C rows, Zvvofp8mm and Zvvofp4ofp8mm, are deferred to C3). altfmt
+// selects the C format. OFP4 and OFP8 inputs ignore altfmt_A/altfmt_B for
+// extension selection (any E4M3/E5M2 mix is legal where OFP8 is an input);
+// OFP4 additionally requires altfmt_A = altfmt_B = 0 (AMB-05).
 function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
   let same_inputs = vtype[altfmt_A] == vtype[altfmt_B];
   let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
+  let bf16_in = vtype[altfmt_A] == 0b1;
   let bf16_c = vtype[altfmt] == 0b1;
-  let zvvfmm = currentlyEnabled(Ext_Zvvfmm);
-  // The coarse Zvvfmm family flag requires only Zve32f (ime_types.sail), so
-  // every row whose C type is FP64 additionally requires Zve64d here
-  // (tbl-extensions S:808-843: Zvvofp8fp64mm, Zvvfp16fp64mm, Zvvfp32fp64mm,
-  // Zvvfp64mm all depend on Zve64d, not Zve32f).
-  let zve64d = currentlyEnabled(Ext_Zve64d);
   match (W, SEW) {
     // FP16 x FP16 -> FP16 and BF16 x BF16 -> BF16 are legal; FP16 x FP16 ->
-    // BF16 and BF16 x BF16 -> FP16 are reserved. A mixed FP16/BF16 input
-    // pair is legal into either C format (S:7298-7305).
-    (1, 16) => zvvfmm & (if same_inputs then vtype[altfmt] == vtype[altfmt_A] else true),
+    // BF16 and BF16 x BF16 -> FP16 are reserved (the C format shall match
+    // the input format when the inputs match). A mixed FP16/BF16 input
+    // pair is legal into either C format (S:7250-7270).
+    (1, 16) => ime_fp16bf16_ext_ok(Ext_Zvvfp16mm, Ext_Zvvbf16mm, same_inputs, bf16_in) &
+               (if same_inputs then bf16_c == bf16_in else true),
     // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1490-1494).
-    (1, 32) => not(bf16_c) & zvvfmm,
-    (1, 64) => not(bf16_c) & zvvfmm & zve64d,
-    // FP16/BF16 -> FP32, FP32 -> FP64 (altfmt_A/altfmt_B ignored), FP16/BF16 -> FP64.
-    (2, 32) => not(bf16_c) & zvvfmm,
-    (2, 64) => not(bf16_c) & zvvfmm & zve64d,
-    (4, 64) => not(bf16_c) & zvvfmm & zve64d,
-    // OFP8 -> FP16/BF16, OFP4 -> FP16/BF16, OFP8 -> FP32.
-    (2, 16) => if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp8bf16mm, Ext_Zvvxnofp8bf16mm)
-               else ime_fp_base_ext_ok(Ext_Zvvxofp8fp16mm, Ext_Zvvxnofp8fp16mm),
+    (1, 32) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp32mm),
+    (1, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp64mm),
+    // OFP8 -> FP16/BF16.
+    (2, 16) => if bf16_c then currentlyEnabled(Ext_Zvvofp8bf16mm) else currentlyEnabled(Ext_Zvvofp8fp16mm),
+    // FP16/BF16 -> FP32; the C format is fixed at FP32 (no "BF32").
+    (2, 32) => not(bf16_c) & ime_fp16bf16_ext_ok(Ext_Zvvfp16fp32mm, Ext_Zvvbf16fp32mm, same_inputs, bf16_in),
+    // FP32 -> FP64 (altfmt_A/altfmt_B ignored).
+    (2, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp32fp64mm),
+    // OFP4 -> FP16/BF16.
     (4, 16) => default_inputs &
-               (if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp4bf16mm, Ext_Zvvxnofp4bf16mm)
-                else ime_fp_base_ext_ok(Ext_Zvvxofp4fp16mm, Ext_Zvvxnofp4fp16mm)),
-    (4, 32) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp32mm, Ext_Zvvxnofp8fp32mm),
-    // OFP4 -> FP32, OFP8 -> FP64.
-    (8, 32) => default_inputs & not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp4fp32mm, Ext_Zvvxnofp4fp32mm),
-    (8, 64) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp64mm, Ext_Zvvxnofp8fp64mm) & zve64d,
+               (if bf16_c then currentlyEnabled(Ext_Zvvofp4bf16mm) else currentlyEnabled(Ext_Zvvofp4fp16mm)),
+    // OFP8 -> FP32.
+    (4, 32) => not(bf16_c) & currentlyEnabled(Ext_Zvvofp8fp32mm),
+    // FP16/BF16 -> FP64; the C format is fixed at FP64 (no "BF64").
+    (4, 64) => not(bf16_c) & ime_fp16bf16_ext_ok(Ext_Zvvfp16fp64mm, Ext_Zvvbf16fp64mm, same_inputs, bf16_in),
+    // OFP4 -> FP32.
+    (8, 32) => default_inputs & not(bf16_c) & currentlyEnabled(Ext_Zvvofp4fp32mm),
+    // OFP8 -> FP64.
+    (8, 64) => not(bf16_c) & currentlyEnabled(Ext_Zvvofp8fp64mm),
     _       => false,
   }
 }
@@ -422,6 +431,29 @@ function ime_int_mx_row_ok(W : nat, SEW : int) -> bool = {
     _       => false,
   })
 }
+
+// vm=1 legality per tbl-int-encoding-map for the implemented rows.
+// altfmt_A and altfmt_B select signed/unsigned interpretation and do not
+// change which extension the row requires. (W, SEW) combinations with no
+// row in the table (vqmmacc/v8wmmacc at SEW=8, v8wmmacc at SEW=16) are
+// reserved.
+function ime_int_row_ok(W : nat, SEW : int) -> bool =
+  match (W, SEW) {
+    (1, 8)  => currentlyEnabled(Ext_Zvvi8mm),
+    (1, 16) => currentlyEnabled(Ext_Zvvi16mm),
+    (1, 32) => currentlyEnabled(Ext_Zvvi32mm),
+    (1, 64) => currentlyEnabled(Ext_Zvvi64mm),
+    (2, 8)  => currentlyEnabled(Ext_Zvvi4i8mm),
+    (2, 16) => currentlyEnabled(Ext_Zvvi8i16mm),
+    (2, 32) => currentlyEnabled(Ext_Zvvi16i32mm),
+    (2, 64) => currentlyEnabled(Ext_Zvvi32i64mm),
+    (4, 16) => currentlyEnabled(Ext_Zvvi4i16mm),
+    (4, 32) => currentlyEnabled(Ext_Zvvi8i32mm),
+    (4, 64) => currentlyEnabled(Ext_Zvvi16i64mm),
+    (8, 32) => currentlyEnabled(Ext_Zvvi4i32mm),
+    (8, 64) => currentlyEnabled(Ext_Zvvi8i64mm),
+    _       => false,
+  }
 
 // check_microscaling_legality: SEW * lambda >= 16, and for BS=16
 // W * LMUL <= SEW. Also no operand group may overlap v0 (groups are
