@@ -1020,6 +1020,144 @@ private function check_misc_extension_dependencies() -> bool = {
   valid
 }
 
+// Integrated Matrix Extension (draft Zvvm family) dependencies. Zvvmm,
+// Zvvmtls, and Zvvmttls require only Zve32x; Zvvfmm and every microscaling
+// extension read vtype.altfmt_A/altfmt_B, read frm, and write fflags, so
+// they require Zve32f (tbl-extensions S:808-843, tbl-mx-extensions
+// S:7164-7206). The *fp64mm microscaling extensions require Zve64d instead.
+private function check_ime_extension_dependencies() -> bool = {
+  var valid : bool = true;
+  if (config extensions.Zvvmm.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
+    valid = false;
+    print_endline("The Zvvmm extension is enabled but Zve32x is disabled: supporting Zvvmm requires Zve32x.");
+  };
+  if (config extensions.Zvvmtls.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
+    valid = false;
+    print_endline("The Zvvmtls extension is enabled but Zve32x is disabled: supporting Zvvmtls requires Zve32x.");
+  };
+  if (config extensions.Zvvmttls.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
+    valid = false;
+    print_endline("The Zvvmttls extension is enabled but Zve32x is disabled: supporting Zvvmttls requires Zve32x.");
+  };
+  if (config extensions.Zvvfmm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvfmm extension is enabled but Zve32f is disabled: supporting Zvvfmm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi4bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi4bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxi4bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi4fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi4fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxi4fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi4fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi4fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxi4fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi8bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi8bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxi8bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi8fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi8fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxi8fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi8fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxi8fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxi8fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxi8fp64mm.supported : bool) & not(hartSupports(Ext_Zve64d)) then {
+    valid = false;
+    print_endline("The Zvvxi8fp64mm extension is enabled but Zve64d is disabled: supporting Zvvxi8fp64mm requires Zve64d.");
+  };
+  if (config extensions.Zvvxni4bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni4bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxni4bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni4fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni4fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxni4fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni4fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni4fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxni4fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni8bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni8bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxni8bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni8fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni8fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxni8fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni8fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxni8fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxni8fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxni8fp64mm.supported : bool) & not(hartSupports(Ext_Zve64d)) then {
+    valid = false;
+    print_endline("The Zvvxni8fp64mm extension is enabled but Zve64d is disabled: supporting Zvvxni8fp64mm requires Zve64d.");
+  };
+  if (config extensions.Zvvxnofp4bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp4bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp4bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp4fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp4fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp4fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp4fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp4fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp4fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp8bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp8bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp8bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp8fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp8fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp8fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp8fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxnofp8fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxnofp8fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxnofp8fp64mm.supported : bool) & not(hartSupports(Ext_Zve64d)) then {
+    valid = false;
+    print_endline("The Zvvxnofp8fp64mm extension is enabled but Zve64d is disabled: supporting Zvvxnofp8fp64mm requires Zve64d.");
+  };
+  if (config extensions.Zvvxofp4bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp4bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxofp4bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp4fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp4fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxofp4fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp4fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp4fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxofp4fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp8bf16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp8bf16mm extension is enabled but Zve32f is disabled: supporting Zvvxofp8bf16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp8fp16mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp8fp16mm extension is enabled but Zve32f is disabled: supporting Zvvxofp8fp16mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp8fp32mm.supported : bool) & not(hartSupports(Ext_Zve32f)) then {
+    valid = false;
+    print_endline("The Zvvxofp8fp32mm extension is enabled but Zve32f is disabled: supporting Zvvxofp8fp32mm requires Zve32f.");
+  };
+  if (config extensions.Zvvxofp8fp64mm.supported : bool) & not(hartSupports(Ext_Zve64d)) then {
+    valid = false;
+    print_endline("The Zvvxofp8fp64mm extension is enabled but Zve64d is disabled: supporting Zvvxofp8fp64mm requires Zve64d.");
+  };
+  valid
+}
+
 private function check_extension_param_constraints() -> bool = {
   var valid : bool = true;
   if (config extensions.Zic64b.supported : bool) & (plat_cache_block_size_exp != 6) then {
@@ -1277,6 +1415,7 @@ function config_is_valid() -> bool = {
   & check_vext_config()
   & check_pmp()
   & check_misc_extension_dependencies()
+  & check_ime_extension_dependencies()
   & check_extension_param_constraints()
   & check_version_constraints()
   & check_platform_constraints()
