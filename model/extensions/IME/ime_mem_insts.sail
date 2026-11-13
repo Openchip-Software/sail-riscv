@@ -312,10 +312,14 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
   // vm=0 of the widening forms is the integer-input MX instruction.
   if vm == 0b0 & W != 1 then return execute_ime_int_mx(W, vs1, vs2, vd);
 
+  // vstart is VSTART_MANDATORY: the specification requires an illegal
+  // instruction exception for any nonzero vstart (S:1272, S:5463). That
+  // class ignores num_elem/EMUL_pow; operand A's LMUL-aligned register
+  // group is passed only to match illegal_vstart's signature.
   if vm != 0b1 |
      not(currentlyEnabled(Ext_Zvvmm)) |
      not(valid_vtype()) |
-     unsigned(vstart) != 0 |
+     illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
      lambda_value == 0 |
      LMUL == 0 |
      not(valid_reg_group(vs1, LMUL_pow)) |

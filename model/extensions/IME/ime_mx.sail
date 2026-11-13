@@ -419,7 +419,13 @@ function ime_gemm_groups_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd 
 function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let rm_3b = fcsr[FRM];
-  if not(valid_vtype()) | unsigned(vstart) != 0 | not(valid_fp_op(SEW, rm_3b))
+  // vstart is VSTART_MANDATORY: the specification requires an illegal
+  // instruction exception for any nonzero vstart (S:1272, S:5463). That
+  // class ignores num_elem/EMUL_pow; operand A's LMUL-aligned register
+  // group is passed only to match illegal_vstart's signature.
+  let LMUL_pow = get_lmul_pow();
+  if not(valid_vtype()) | illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
+     not(valid_fp_op(SEW, rm_3b))
   then return Illegal_Instruction();
 
   let g : ime_gemm_geom = match ime_gemm_geometry(W) {
@@ -448,7 +454,10 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
 function execute_ime_int_mx(W : nat, vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let rm_3b = fcsr[FRM];
-  if not(valid_vtype()) | unsigned(vstart) != 0 | not(valid_fp_op(SEW, rm_3b))
+  // See the comment in execute_ime_fp_engine: vstart is VSTART_MANDATORY.
+  let LMUL_pow = get_lmul_pow();
+  if not(valid_vtype()) | illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
+     not(valid_fp_op(SEW, rm_3b))
   then return Illegal_Instruction();
 
   let g : ime_gemm_geom = match ime_gemm_geometry(W) {
