@@ -76,7 +76,7 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   let epr : nat = vlen / SEW;
   foreach (i from 0 to (num_elem - 1)) {
     if mask[i] == 0b1 then {
-      set_vstart(to_bits_unsafe(16, i));
+      set_vstart(to_bits(i));
       let mem_off = if transposed
                     then ime_tile_transposed_mem_off(i, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
@@ -175,7 +175,7 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   let epr : nat = vlen / SEW;
   foreach (i from 0 to (num_elem - 1)) {
     if mask[i] == 0b1 then {
-      set_vstart(to_bits_unsafe(16, i));
+      set_vstart(to_bits(i));
       let mem_off = if transposed
                     then ime_tile_transposed_mem_off(i, cols, LD)
                     else ime_tile_ordered_mem_off(i, cols, LD);
