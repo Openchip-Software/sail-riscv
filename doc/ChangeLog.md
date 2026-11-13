@@ -1,5 +1,11 @@
 # Release notes for the next version
 
+- The following unratified extensions have been added:
+  - IME (Zvvm), the Integrated Matrix Extension family: matrix
+    multiply-accumulate (Zvvmm, Zvvfmm), tile load/store (Zvvmtls,
+    Zvvmttls), and their fine-grained computational and microscaling
+    sub-extensions
+
 - Updates to the [configuration file](../config/config.json.in):
   - Whether the `misa` CSR is implemented can now be specified; see
     `base.misa_implemented`.
