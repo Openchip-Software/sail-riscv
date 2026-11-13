@@ -97,7 +97,7 @@ private function execute_vsetvl_type(
   ta : bits(1),
   sew : bits(3),
   lmul : bits(3),
-  lambda_field : bits(3),
+  lambda_requested : bits(3),
   bs_field : bits(1),
   altfmt_A_field : bits(1),
   altfmt_B_field : bits(1),
@@ -131,7 +131,9 @@ private function execute_vsetvl_type(
   let VLMAX = 2 ^ (LMUL_pow_new + vlen_exp - SEW_pow_new);
 
   let ime_fields_enabled = ime_vtype_fields_enabled();
-  let lambda_field_new = if ime_fields_enabled then ime_select_vtype_lambda(lambda_field, sew) else 0b000;
+  // `vtype` still holds the pre-configuration value here, so vtype[vlambda]
+  // is the current lambda the write rules are evaluated against.
+  let lambda_field_new = if ime_fields_enabled then ime_select_vtype_lambda(lambda_requested, vtype[vlambda], sew) else 0b000;
   let bs_field_new = if ime_fields_enabled then bs_field else 0b0;
   let altfmt_A_field_new = if ime_fields_enabled then altfmt_A_field else 0b0;
   let altfmt_B_field_new = if ime_fields_enabled then altfmt_B_field else 0b0;
@@ -181,7 +183,10 @@ function clause execute VSETVLI(vtr, ma, ta, sew, lmul, rs1, rd) = {
 
   let requires_fixed_vlmax = rd == zreg & rs1 == zreg;
 
-  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, requires_fixed_vlmax, rd)
+  // vsetvli does not carry a lambda request of its own (the field is
+  // outside the vtypei immediate); 000 selects the preserve-or-initialize
+  // rule against the current vtype.lambda.
+  execute_vsetvl_type(ma, ta, sew, lmul, 0b000, vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, requires_fixed_vlmax, rd)
 }
 
 
@@ -208,6 +213,8 @@ function clause execute VSETVL(rs2, rs1, rd) = {
 
   let requires_fixed_vlmax = rd == zreg & rs1 == zreg;
 
+  // vt[vlambda] is the lambda write request carried in rs2 (zero is a
+  // preserve-or-initialize request, nonzero requests that exact value).
   execute_vsetvl_type(vt[vma], vt[vta], vt[vsew], vt[vlmul], vt[vlambda], vt[vbs], vt[altfmt_A], vt[altfmt_B], vt[altfmt], avl, requires_fixed_vlmax, rd)
 }
 
@@ -226,7 +233,8 @@ function clause execute VSETIVLI(vtr, ma, ta, sew, lmul, uimm, rd) = {
   then return handle_illegal_vtype(rd);
 
   let avl : xlenbits = zero_extend(uimm);
-  execute_vsetvl_type(ma, ta, sew, lmul, vtype[vlambda], vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, false, rd)
+  // vsetivli does not carry a lambda request of its own either; see VSETVLI.
+  execute_vsetvl_type(ma, ta, sew, lmul, 0b000, vtype[vbs], vtype[altfmt_A], vtype[altfmt_B], [vtr[0]], avl, false, rd)
 }
 
 mapping clause assembly = VSETIVLI(vtr, ma, ta, sew, lmul, uimm, rd)

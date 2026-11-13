@@ -67,14 +67,30 @@ function ime_lambda_value_to_field(value : int) -> bits(3) =
   else if value == 64 then 0b111
   else 0b000
 
+// EMUL_C in {1, 2, 4, 8, 16}.
+function ime_group_size_legal(group : nat) -> bool =
+  group == 1 | group == 2 | group == 4 | group == 8 | group == 16
+
+// A nonzero lambda is architecturally permissible for (VLEN, SEW) only when
+// EMUL_C = VLEN / (SEW * lambda^2) is an integer in {1, 2, 4, 8, 16}
+// (spec "Selected lambda" section). The model supports every permissible
+// lambda, so "supported" and "permissible" coincide here.
 function ime_lambda_supported_value_for_vsew(lambda_value : int, sew : bits(3)) -> bool = {
   let sew_bits = 2 ^ (unsigned(sew) + 3);
-  lambda_value > 0 & lambda_value <= (vlen / sew_bits)
+  if lambda_value <= 0 then false
+  else {
+    let denom = sew_bits * lambda_value * lambda_value;
+    if denom <= 0 then false
+    else (vlen % denom == 0) & ime_group_size_legal(vlen / denom)
+  }
 }
 
 function ime_lambda_supported_for_vsew(field : bits(3), sew : bits(3)) -> bool =
   ime_lambda_supported_value_for_vsew(ime_lambda_field_to_value(field), sew)
 
+// Largest supported nonzero lambda for (VLEN, SEW), or 0b000 when (VLEN, SEW)
+// is outside the IME-legal configuration domain (no nonzero lambda is
+// permissible, not even lambda = 1).
 function ime_largest_supported_lambda_for_vsew(sew : bits(3)) -> bits(3) =
   if ime_lambda_supported_value_for_vsew(64, sew) then 0b111
   else if ime_lambda_supported_value_for_vsew(32, sew) then 0b110
@@ -82,12 +98,52 @@ function ime_largest_supported_lambda_for_vsew(sew : bits(3)) -> bits(3) =
   else if ime_lambda_supported_value_for_vsew(8, sew) then 0b100
   else if ime_lambda_supported_value_for_vsew(4, sew) then 0b011
   else if ime_lambda_supported_value_for_vsew(2, sew) then 0b010
-  else 0b001
+  else if ime_lambda_supported_value_for_vsew(1, sew) then 0b001
+  else 0b000
 
-function ime_select_vtype_lambda(requested : bits(3), sew : bits(3)) -> bits(3) =
-  if requested != 0b000 & ime_lambda_supported_for_vsew(requested, sew)
-  then requested
-  else ime_largest_supported_lambda_for_vsew(sew)
+// Smallest supported nonzero lambda for (VLEN, SEW), or 0b000 outside the
+// IME-legal configuration domain.
+function ime_smallest_supported_lambda_for_vsew(sew : bits(3)) -> bits(3) =
+  if ime_lambda_supported_value_for_vsew(1, sew) then 0b001
+  else if ime_lambda_supported_value_for_vsew(2, sew) then 0b010
+  else if ime_lambda_supported_value_for_vsew(4, sew) then 0b011
+  else if ime_lambda_supported_value_for_vsew(8, sew) then 0b100
+  else if ime_lambda_supported_value_for_vsew(16, sew) then 0b101
+  else if ime_lambda_supported_value_for_vsew(32, sew) then 0b110
+  else if ime_lambda_supported_value_for_vsew(64, sew) then 0b111
+  else 0b000
+
+// Largest supported nonzero lambda that is <= requested_value, or 0b000 when
+// no supported value is that small.
+function ime_largest_supported_lambda_leq(requested_value : int, sew : bits(3)) -> bits(3) =
+  if requested_value >= 64 & ime_lambda_supported_value_for_vsew(64, sew) then 0b111
+  else if requested_value >= 32 & ime_lambda_supported_value_for_vsew(32, sew) then 0b110
+  else if requested_value >= 16 & ime_lambda_supported_value_for_vsew(16, sew) then 0b101
+  else if requested_value >= 8 & ime_lambda_supported_value_for_vsew(8, sew) then 0b100
+  else if requested_value >= 4 & ime_lambda_supported_value_for_vsew(4, sew) then 0b011
+  else if requested_value >= 2 & ime_lambda_supported_value_for_vsew(2, sew) then 0b010
+  else if requested_value >= 1 & ime_lambda_supported_value_for_vsew(1, sew) then 0b001
+  else 0b000
+
+// Lambda write rules (spec "lambda write rules"):
+// - A write of 000 is a preserve-or-initialize request: retain `current` if
+//   it is still supported for the resulting (VLEN, SEW); otherwise select
+//   the largest supported nonzero lambda, or 000 outside the IME-legal
+//   domain.
+// - A nonzero write requests that exact value: retain it if supported;
+//   otherwise select the largest supported value <= the request, or, if
+//   none is that small, the smallest supported value; or 000 outside the
+//   IME-legal domain.
+function ime_select_vtype_lambda(requested : bits(3), current : bits(3), sew : bits(3)) -> bits(3) =
+  if requested == 0b000 then {
+    if current != 0b000 & ime_lambda_supported_for_vsew(current, sew)
+    then current
+    else ime_largest_supported_lambda_for_vsew(sew)
+  } else if ime_lambda_supported_for_vsew(requested, sew) then requested
+  else {
+    let leq = ime_largest_supported_lambda_leq(ime_lambda_field_to_value(requested), sew);
+    if leq != 0b000 then leq else ime_smallest_supported_lambda_for_vsew(sew)
+  }
 
 function ime_vtype_fields_clear(vt : Vtype) -> bool =
   vt[vlambda] == 0b000 &
@@ -130,10 +186,6 @@ function ime_group_size_to_pow(group : nat) -> int =
   else if group == 4 then 2
   else if group == 8 then 3
   else 4
-
-// EMUL_C in {1, 2, 4, 8, 16}.
-function ime_group_size_legal(group : nat) -> bool =
-  group == 1 | group == 2 | group == 4 | group == 8 | group == 16
 
 // True when the architectural vector-register ranges [a, a + a_regs) and
 // [b, b + b_regs) name no register in common. Register-group bases are not
