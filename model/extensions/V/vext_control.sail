@@ -42,18 +42,25 @@ function get_num_elem(LMUL_pow : LMUL_pow, SEW : sew_bitsize) -> range(1, vlen) 
   (2 ^ max(0, LMUL_pow)) * vlen / SEW
 }
 
-// Read a single element of a vector register group (starting at vrid).
-val read_single_element : forall 'sew, is_sew_bitsize('sew) . (int('sew), nat, vregidx) -> bits('sew)
-function read_single_element(EEW, index, vrid) = {
+// Read a single element of a register group of at most max_regs registers
+// (starting at vrid). Vector instructions use 8 (max LMUL); the IME C
+// accumulator group (EMUL_C) can be 16.
+val read_single_element_in_group : forall 'sew 'm, is_sew_bitsize('sew) & 'm in {8, 16} . (int('sew), nat, vregidx, int('m)) -> bits('sew)
+function read_single_element_in_group(EEW, index, vrid, max_regs) = {
   assert(EEW <= vlen);
   static_assert(vlen % EEW == 0);
 
   // Number of EEW-bit elements per vector register.
   let elem_per_reg = vlen / EEW;
 
-  // Register in group. Max LMUL is 8, so this should be in [0, 8).
+  // Register in group, in [0, max_regs).
   let reg_in_group = index / elem_per_reg;
-  assert(reg_in_group < 8);
+  assert(reg_in_group < max_regs);
+
+  // The group must not wrap past v31: vregidx addition below wraps modulo
+  // 32, which would otherwise silently alias into the start of the
+  // register file.
+  assert(unsigned(vregidx_bits(vrid)) + reg_in_group < 32);
 
   // Get the actual register in the group that we need to write, and the index into it.
   let vrid = vrid + reg_in_group;
@@ -63,6 +70,10 @@ function read_single_element(EEW, index, vrid) = {
 
   V(vrid)[(offset + EEW - 1) .. offset]
 }
+
+// Read a single element of a vector register group (starting at vrid).
+val read_single_element : forall 'sew, is_sew_bitsize('sew) . (int('sew), nat, vregidx) -> bits('sew)
+function read_single_element(EEW, index, vrid) = read_single_element_in_group(EEW, index, vrid, 8)
 
 // The general vreg reading operation with num_elem as max(VLMAX,VLEN/SEW)).
 val read_vreg : forall 'n 'sew 'p, 'n >= 0 & is_sew_bitsize('sew) . (int('n), int('sew), int('p), vregidx) -> vector('n, bits('sew))
@@ -83,19 +94,26 @@ function read_vreg(num_elem, SEW, LMUL_pow, vrid) = {
   result
 }
 
-// Write a single element of a vector register group (starting at vrid),
-// leaving all other elements unchanged.
-val write_single_element : forall 'sew, is_sew_bitsize('sew) . (int('sew), nat, vregidx, bits('sew)) -> unit
-function write_single_element(EEW, index, vrid, value) = {
+// Write a single element of a register group of at most max_regs registers
+// (starting at vrid), leaving all other elements unchanged. Vector
+// instructions use 8 (max LMUL); the IME C accumulator group (EMUL_C) can
+// be 16.
+val write_single_element_in_group : forall 'sew 'm, is_sew_bitsize('sew) & 'm in {8, 16} . (int('sew), nat, vregidx, bits('sew), int('m)) -> unit
+function write_single_element_in_group(EEW, index, vrid, value, max_regs) = {
   assert(EEW <= vlen);
   static_assert(vlen % EEW == 0);
 
   // Number of EEW-bit elements per vector register.
   let elem_per_reg = vlen / EEW;
 
-  // Register in group. Max LMUL is 8, so this should be in [0, 8).
+  // Register in group, in [0, max_regs).
   let reg_in_group = index / elem_per_reg;
-  assert(reg_in_group < 8);
+  assert(reg_in_group < max_regs);
+
+  // The group must not wrap past v31: vregidx addition below wraps modulo
+  // 32, which would otherwise silently alias into the start of the
+  // register file.
+  assert(unsigned(vregidx_bits(vrid)) + reg_in_group < 32);
 
   // Get the actual register in the group that we need to write, and the index into it.
   let vrid = vrid + reg_in_group;
@@ -105,6 +123,11 @@ function write_single_element(EEW, index, vrid, value) = {
 
   V(vrid) = [V(vrid) with (offset + EEW - 1) .. offset = value];
 }
+
+// Write a single element of a vector register group (starting at vrid),
+// leaving all other elements unchanged.
+val write_single_element : forall 'sew, is_sew_bitsize('sew) . (int('sew), nat, vregidx, bits('sew)) -> unit
+function write_single_element(EEW, index, vrid, value) = write_single_element_in_group(EEW, index, vrid, value, 8)
 
 // Write a complete vector register group.
 //

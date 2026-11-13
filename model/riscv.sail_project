@@ -629,6 +629,7 @@ unit_tests {
     unit_tests/test_ime_vtype.sail,
     unit_tests/test_ime_asm.sail,
     unit_tests/test_ime_fp.sail,
+    unit_tests/test_ime_gemm.sail,
 }
 
 main {

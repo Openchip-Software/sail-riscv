@@ -131,8 +131,19 @@ function ime_group_size_to_pow(group : nat) -> int =
   else if group == 8 then 3
   else 4
 
+// EMUL_C in {1, 2, 4, 8, 16}.
 function ime_group_size_legal(group : nat) -> bool =
-  group == 1 | group == 2 | group == 4 | group == 8
+  group == 1 | group == 2 | group == 4 | group == 8 | group == 16
+
+// True when the architectural vector-register ranges [a, a + a_regs) and
+// [b, b + b_regs) name no register in common. Register-group bases are not
+// reduced modulo 32 here: IME register groups are aligned and at most 16
+// registers wide, so a legal group never wraps past v31.
+function ime_reg_groups_disjoint(a : vregidx, a_regs : nat, b : vregidx, b_regs : nat) -> bool = {
+  let a0 : nat = unsigned(vregidx_bits(a));
+  let b0 : nat = unsigned(vregidx_bits(b));
+  a0 + a_regs <= b0 | b0 + b_regs <= a0
+}
 
 // Map a sequential tile element index to the flat architectural element
 // index within a vector register group. The index and elems_per_reg use the

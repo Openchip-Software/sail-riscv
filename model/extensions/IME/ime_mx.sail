@@ -139,17 +139,17 @@ function ime_read_in_signed(EEW_A : int, idx : nat, vs : vregidx) -> int = {
 // Read/write a C element of width EEW_C (16, 32, 64), zero-extended to 64.
 function ime_read_c(EEW_C : int, idx : nat, vd : vregidx) -> bits(64) =
   match EEW_C {
-    16 => zero_extend(64, read_single_element(16, idx, vd)),
-    32 => zero_extend(64, read_single_element(32, idx, vd)),
-    64 => read_single_element(64, idx, vd),
+    16 => zero_extend(64, read_single_element_in_group(16, idx, vd, IME_EMUL_C_MAX)),
+    32 => zero_extend(64, read_single_element_in_group(32, idx, vd, IME_EMUL_C_MAX)),
+    64 => read_single_element_in_group(64, idx, vd, IME_EMUL_C_MAX),
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
 function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit =
   match EEW_C {
-    16 => write_single_element(16, idx, vd, v[15 .. 0]),
-    32 => write_single_element(32, idx, vd, v[31 .. 0]),
-    64 => write_single_element(64, idx, vd, v),
+    16 => write_single_element_in_group(16, idx, vd, v[15 .. 0], IME_EMUL_C_MAX),
+    32 => write_single_element_in_group(32, idx, vd, v[31 .. 0], IME_EMUL_C_MAX),
+    64 => write_single_element_in_group(64, idx, vd, v, IME_EMUL_C_MAX),
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
@@ -368,11 +368,15 @@ function ime_mx_operands_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd 
   not(vtype[vbs] == 0b1 & g.W * g.LMUL > g.EEW_C) &
   vs1 != zvreg & vs2 != zvreg & vd != zvreg
 
-// Register groups: vs1/vs2 aligned to LMUL, vd aligned to EMUL_C.
+// Register groups: vs1/vs2 aligned to LMUL, vd aligned to EMUL_C. The C
+// accumulator group shall not overlap either input group, regardless of VL
+// (spec S:551-559); the two input groups may overlap each other (S:561-564).
 function ime_gemm_groups_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> bool =
   valid_reg_group(vs1, ime_group_size_to_pow(g.LMUL)) &
   valid_reg_group(vs2, ime_group_size_to_pow(g.LMUL)) &
-  valid_reg_group(vd, ime_group_size_to_pow(g.EMUL_C))
+  valid_reg_group(vd, ime_group_size_to_pow(g.EMUL_C)) &
+  ime_reg_groups_disjoint(vd, g.EMUL_C, vs1, g.LMUL) &
+  ime_reg_groups_disjoint(vd, g.EMUL_C, vs2, g.LMUL)
 
 // ---------------------------------------------------------------------------
 // Execution entry points.
@@ -400,6 +404,7 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
   let fmt_B = ime_fp_format_of(g.EEW_A, vtype[altfmt_B]);
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
   ime_fp_gemm(g, fmt_A, fmt_B, fmt_C, scaling, unsigned(rm_3b), vs1, vs2, vd);
+  set_vstart(zeros());
   RETIRE_SUCCESS
 }
 
@@ -423,5 +428,6 @@ function execute_ime_int_mx(W : nat, vs1 : vregidx, vs2 : vregidx, vd : vregidx)
 
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
   ime_int_scaled_gemm(g, fmt_C, unsigned(rm_3b), vs1, vs2, vd);
+  set_vstart(zeros());
   RETIRE_SUCCESS
 }
