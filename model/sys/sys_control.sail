@@ -604,6 +604,12 @@ function reset_sys() -> unit = {
   vtype[vill]      = 0b1;
   vtype[reserved]  = zeros();
   vtype[altfmt]    = 0b0;
+  // The IME fields read as cleared whenever vtype.vill = 1, including on
+  // reset (spec S:866-868).
+  vtype[vlambda]   = 0b000;
+  vtype[vbs]       = 0b0;
+  vtype[altfmt_A]  = 0b0;
+  vtype[altfmt_B]  = 0b0;
   vtype[vma]       = 0b0;
   vtype[vta]       = 0b0;
   vtype[vsew]      = 0b000;
