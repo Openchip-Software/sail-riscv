@@ -962,6 +962,81 @@ function currentlyEnabled_measure(ext : extension) -> int =
 
     Ext_Zhinxmin => 12, // > Zhinx
 
+    // IME (Zvvm) family. Four tiers: the family flags and the BS=16
+    // microscaling extensions depend only on Zve32x/Zve32f/Zve64d (value
+    // 4 at most), so value 5 covers both. The BS=32 microscaling
+    // extensions each call their BS=16 sibling, so value 6. The 31
+    // individual computational extensions each call a family flag and,
+    // where one exists, their BS=32 microscaling counterpart, so value 7.
+    Ext_Zvvfmm => 5, // > Zve32x/Zve32f
+    Ext_Zvvmm => 5, // > Zve32x/Zve32f
+    Ext_Zvvmtls => 5, // > Zve32x
+    Ext_Zvvmttls => 5, // > Zve32x
+
+    Ext_Zvvxni4bf16mm => 5, // > Zve32f
+    Ext_Zvvxni4fp16mm => 5, // > Zve32f
+    Ext_Zvvxni4fp32mm => 5, // > Zve32f
+    Ext_Zvvxni8bf16mm => 5, // > Zve32f
+    Ext_Zvvxni8fp16mm => 5, // > Zve32f
+    Ext_Zvvxni8fp32mm => 5, // > Zve32f
+    Ext_Zvvxni8fp64mm => 5, // > Zve64d
+    Ext_Zvvxnofp4bf16mm => 5, // > Zve32f
+    Ext_Zvvxnofp4fp16mm => 5, // > Zve32f
+    Ext_Zvvxnofp4fp32mm => 5, // > Zve32f
+    Ext_Zvvxnofp4ofp8mm => 5, // > Zve32f
+    Ext_Zvvxnofp8bf16mm => 5, // > Zve32f
+    Ext_Zvvxnofp8fp16mm => 5, // > Zve32f
+    Ext_Zvvxnofp8fp32mm => 5, // > Zve32f
+    Ext_Zvvxnofp8fp64mm => 5, // > Zve64d
+
+    Ext_Zvvxi4bf16mm => 6, // > Zvvxni4bf16mm
+    Ext_Zvvxi4fp16mm => 6, // > Zvvxni4fp16mm
+    Ext_Zvvxi4fp32mm => 6, // > Zvvxni4fp32mm
+    Ext_Zvvxi8bf16mm => 6, // > Zvvxni8bf16mm
+    Ext_Zvvxi8fp16mm => 6, // > Zvvxni8fp16mm
+    Ext_Zvvxi8fp32mm => 6, // > Zvvxni8fp32mm
+    Ext_Zvvxi8fp64mm => 6, // > Zvvxni8fp64mm
+    Ext_Zvvxofp4bf16mm => 6, // > Zvvxnofp4bf16mm
+    Ext_Zvvxofp4fp16mm => 6, // > Zvvxnofp4fp16mm
+    Ext_Zvvxofp4fp32mm => 6, // > Zvvxnofp4fp32mm
+    Ext_Zvvxofp4ofp8mm => 6, // > Zvvxnofp4ofp8mm
+    Ext_Zvvxofp8bf16mm => 6, // > Zvvxnofp8bf16mm
+    Ext_Zvvxofp8fp16mm => 6, // > Zvvxnofp8fp16mm
+    Ext_Zvvxofp8fp32mm => 6, // > Zvvxnofp8fp32mm
+    Ext_Zvvxofp8fp64mm => 6, // > Zvvxnofp8fp64mm
+
+    Ext_Zvvbf16fp32mm => 7, // > Zvvfmm
+    Ext_Zvvbf16fp64mm => 7, // > Zvvfmm
+    Ext_Zvvbf16mm => 7, // > Zvvfmm
+    Ext_Zvvfp16fp32mm => 7, // > Zvvfmm
+    Ext_Zvvfp16fp64mm => 7, // > Zvvfmm
+    Ext_Zvvfp16mm => 7, // > Zvvfmm
+    Ext_Zvvfp32fp64mm => 7, // > Zvvfmm
+    Ext_Zvvfp32mm => 7, // > Zvvfmm
+    Ext_Zvvfp64mm => 7, // > Zvvfmm
+    Ext_Zvvi16i32mm => 7, // > Zvvmm
+    Ext_Zvvi16i64mm => 7, // > Zvvmm
+    Ext_Zvvi16mm => 7, // > Zvvmm
+    Ext_Zvvi32i64mm => 7, // > Zvvmm
+    Ext_Zvvi32mm => 7, // > Zvvmm
+    Ext_Zvvi4i16mm => 7, // > Zvvmm
+    Ext_Zvvi4i32mm => 7, // > Zvvmm
+    Ext_Zvvi4i8mm => 7, // > Zvvmm
+    Ext_Zvvi64mm => 7, // > Zvvmm
+    Ext_Zvvi8i16mm => 7, // > Zvvmm
+    Ext_Zvvi8i32mm => 7, // > Zvvmm
+    Ext_Zvvi8i64mm => 7, // > Zvvmm
+    Ext_Zvvi8mm => 7, // > Zvvmm
+    Ext_Zvvofp4bf16mm => 7, // > Zvvfmm, Zvvxofp4bf16mm
+    Ext_Zvvofp4fp16mm => 7, // > Zvvfmm, Zvvxofp4fp16mm
+    Ext_Zvvofp4fp32mm => 7, // > Zvvfmm, Zvvxofp4fp32mm
+    Ext_Zvvofp4ofp8mm => 7, // > Zvvfmm, Zvvxofp4ofp8mm
+    Ext_Zvvofp8bf16mm => 7, // > Zvvfmm, Zvvxofp8bf16mm
+    Ext_Zvvofp8fp16mm => 7, // > Zvvfmm, Zvvxofp8fp16mm
+    Ext_Zvvofp8fp32mm => 7, // > Zvvfmm, Zvvxofp8fp32mm
+    Ext_Zvvofp8fp64mm => 7, // > Zvvfmm, Zvvxofp8fp64mm
+    Ext_Zvvofp8mm => 7, // > Zvvfmm
+
     _ => 2
   }
 
