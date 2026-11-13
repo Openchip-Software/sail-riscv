@@ -185,6 +185,7 @@ add_ime_test("test_ime_fp_rows.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_emul_c16.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_vtype_lambda.S" "rv64gcv" 64 "ime_override.json")
 add_ime_test("test_ime_fs_off.S" "rv64gcv" 64 "ime_override.json")
+add_ime_test("test_ime_member_only.S" "rv64gcv" 64 "ime_member_only_override.json")
 
 list(LENGTH ime_tests ime_tests_len)
 math(EXPR ime_test_last "${ime_tests_len} - 1")
