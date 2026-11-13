@@ -165,19 +165,36 @@ function ime_block_scales(g : ime_gemm_geom, i : nat, j : nat, s : nat) -> ime_f
   else IME_FPX_FIN(0b0, 1, unsigned(eA) + unsigned(eB) - 2 * IME_E8M0_BIAS)
 }
 
-// fp_group_sum (psm=0): exact sum of A[i,k] * B^T[k,j] for k in [k_lo, k_hi].
+// One term A[i,k] * B^T[k,j] of a group: decoded and multiplied exactly.
+function ime_fp_group_term(g : ime_gemm_geom, i : nat, j : nat, k : nat,
+                           fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt,
+                           vs1 : vregidx, vs2 : vregidx) -> (bits_fflags, ime_fpx) = {
+  let a_flat = ime_mat_A_idx(i, k, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
+  let b_flat = ime_mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
+  let (fa, a) = ime_fp_decode_flags(fmt_A, ime_read_in(g.EEW_A, a_flat, vs1));
+  let (fb, b) = ime_fp_decode_flags(fmt_B, ime_read_in(g.EEW_A, b_flat, vs2));
+  let (fmul, prod) = ime_fpx_mul(a, b);
+  (fa | fb | fmul, prod)
+}
+
+// fp_group_sum (psm=0): exact sum of A[i,k] * B^T[k,j] for k in [k_lo,
+// k_hi]. The sum starts from the first product rather than a literal +0 so
+// a single-term group (W=1) keeps that product's sign exactly, including
+// -0 (spec S:1532-1533: a W=1 sub-dot-product is the exact product; adding
+// it to +0 would turn a -0 product into +0 under round-to-nearest-even).
 function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi : nat,
                           fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, rm : int,
-                          vs1 : vregidx, vs2 : vregidx) -> ime_fpx = {
-  var S : ime_fpx = IME_FPX_FIN(0b0, 0, 0);
-  foreach (k from k_lo to k_hi) {
-    let a_flat = ime_mat_A_idx(i, k, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
-    let b_flat = ime_mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
-    let a = ime_fp_decode_flags(fmt_A, ime_read_in(g.EEW_A, a_flat, vs1));
-    let b = ime_fp_decode_flags(fmt_B, ime_read_in(g.EEW_A, b_flat, vs2));
-    S = ime_fpx_add(S, ime_fpx_mul(a, b), rm)
+                          vs1 : vregidx, vs2 : vregidx) -> (bits_fflags, ime_fpx) = {
+  let (flags0, prod0) = ime_fp_group_term(g, i, j, k_lo, fmt_A, fmt_B, vs1, vs2);
+  var S : ime_fpx = prod0;
+  var flags : bits_fflags = flags0;
+  foreach (k from (k_lo + 1) to k_hi) {
+    let (fprod, prod) = ime_fp_group_term(g, i, j, k, fmt_A, fmt_B, vs1, vs2);
+    let (fadd, sum) = ime_fpx_add(S, prod, rm);
+    S = sum;
+    flags = flags | fprod | fadd
   };
-  S
+  (flags, S)
 }
 
 // Microscaling block size from vtype.bs.
@@ -199,6 +216,7 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
       let c_flat = ime_mat_C_idx(i, j, g.N_max, g.EMUL_C, g.lambda, g.epr_C);
       var acc : bits(64) = ime_read_c(g.EEW_C, c_flat, vd);
       var nan_out : bool = false;
+      var elem_flags : bits_fflags = zeros();
 
       foreach (s from 0 to (S_blocks - 1)) {
         // A NaN combined scale forces C[i,j] to NaN and ends its evaluation.
@@ -226,9 +244,12 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
                 foreach (g0 from subdot_lo to subdot_hi by sizeof(ime_fp_grouping)) {
                   let k_lo : nat = step_k_lo + g0 * g.W;
                   let k_hi = ime_nat(k_lo + sizeof(ime_fp_grouping) * g.W - 1);
-                  let S = ime_fp_group_sum(g, i, j, k_lo, k_hi, fmt_A, fmt_B, rm, vs1, vs2);
-                  let term = ime_fp_round(fmt_C, ime_fpx_mul(S, blk_scale), rm);
-                  acc = ime_fp_add(fmt_C, acc, term, rm)
+                  let (flags_sum, S) = ime_fp_group_sum(g, i, j, k_lo, k_hi, fmt_A, fmt_B, rm, vs1, vs2);
+                  let (flags_mul, prod) = ime_fpx_mul(S, blk_scale);
+                  let (flags_round, term) = ime_fp_round(fmt_C, prod, rm);
+                  let (flags_add, new_acc) = ime_fp_add(fmt_C, acc, term, rm);
+                  acc = new_acc;
+                  elem_flags = elem_flags | flags_sum | flags_mul | flags_round | flags_add
                 }
               }
             }
@@ -236,6 +257,9 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
         }
       };
 
+      // One fflags accrual per active C element, even when no flag is set
+      // (base-V convention: fflags_dirty_policy relies on it).
+      accrue_fflags(elem_flags);
       ime_write_c(g.EEW_C, c_flat, vd, if nan_out then ime_fp_canonical_nan(fmt_C) else acc)
     }
   }
@@ -253,6 +277,7 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
       let c_flat = ime_mat_C_idx(i, j, g.N_max, g.EMUL_C, g.lambda, g.epr_C);
       var acc : bits(64) = ime_read_c(g.EEW_C, c_flat, vd);
       var nan_out : bool = false;
+      var elem_flags : bits_fflags = zeros();
 
       foreach (s from 0 to (S_blocks - 1)) {
         if not(nan_out) then {
@@ -269,12 +294,16 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
               let b_flat = ime_mat_B_idx(k, j, g.K_eff, g.LMUL, g.lambda * g.W, g.epr_A);
               dot = dot + ime_read_in_signed(g.EEW_A, a_flat, vs1) * ime_read_in_signed(g.EEW_A, b_flat, vs2)
             };
-            let term = ime_fp_round(fmt_C, ime_fpx_mul(ime_fpx_of_int(dot), blk_scale), rm);
-            acc = ime_fp_add(fmt_C, acc, term, rm)
+            let (flags_mul, prod) = ime_fpx_mul(ime_fpx_of_int(dot), blk_scale);
+            let (flags_round, term) = ime_fp_round(fmt_C, prod, rm);
+            let (flags_add, new_acc) = ime_fp_add(fmt_C, acc, term, rm);
+            acc = new_acc;
+            elem_flags = elem_flags | flags_mul | flags_round | flags_add
           }
         }
       };
 
+      accrue_fflags(elem_flags);
       ime_write_c(g.EEW_C, c_flat, vd, if nan_out then ime_fp_canonical_nan(fmt_C) else acc)
     }
   }

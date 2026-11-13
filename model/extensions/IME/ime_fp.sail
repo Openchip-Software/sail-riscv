@@ -136,50 +136,53 @@ function ime_fp_decode(f : ime_fp_fmt, v : bits(64)) -> (ime_fpx, bool) = {
   else (IME_FPX_FIN(sign, ime_pow2(mbits) + m, e - bias - mbits), false)
 }
 
-// Decode and raise NV for a signaling NaN operand.
-function ime_fp_decode_flags(f : ime_fp_fmt, v : bits(64)) -> ime_fpx = {
+// Decode and report NV for a signaling NaN operand. Does not call
+// accrue_fflags: the caller collects every flag of one active C element's
+// computation and accrues them together, once, even when none is set
+// (base-V convention; fflags_dirty_policy relies on one call per element).
+function ime_fp_decode_flags(f : ime_fp_fmt, v : bits(64)) -> (bits_fflags, ime_fpx) = {
   let (x, signaling) = ime_fp_decode(f, v);
-  if signaling then accrue_fflags(nvFlag());
-  x
+  (if signaling then nvFlag() else zeros(), x)
 }
 
 // Exact product. 0 * inf raises NV and yields NaN.
-function ime_fpx_mul(a : ime_fpx, b : ime_fpx) -> ime_fpx =
+function ime_fpx_mul(a : ime_fpx, b : ime_fpx) -> (bits_fflags, ime_fpx) =
   match (a, b) {
-    (IME_FPX_NAN(), _) => IME_FPX_NAN(),
-    (_, IME_FPX_NAN()) => IME_FPX_NAN(),
-    (IME_FPX_INF(sa), IME_FPX_INF(sb)) => IME_FPX_INF(sa ^ sb),
+    (IME_FPX_NAN(), _) => (zeros(), IME_FPX_NAN()),
+    (_, IME_FPX_NAN()) => (zeros(), IME_FPX_NAN()),
+    (IME_FPX_INF(sa), IME_FPX_INF(sb)) => (zeros(), IME_FPX_INF(sa ^ sb)),
     (IME_FPX_INF(sa), IME_FPX_FIN(sb, mb, _)) => {
-      if mb == 0 then { accrue_fflags(nvFlag()); IME_FPX_NAN() } else IME_FPX_INF(sa ^ sb)
+      if mb == 0 then (nvFlag(), IME_FPX_NAN()) else (zeros(), IME_FPX_INF(sa ^ sb))
     },
     (IME_FPX_FIN(sa, ma, _), IME_FPX_INF(sb)) => {
-      if ma == 0 then { accrue_fflags(nvFlag()); IME_FPX_NAN() } else IME_FPX_INF(sa ^ sb)
+      if ma == 0 then (nvFlag(), IME_FPX_NAN()) else (zeros(), IME_FPX_INF(sa ^ sb))
     },
-    (IME_FPX_FIN(sa, ma, ea), IME_FPX_FIN(sb, mb, eb)) => IME_FPX_FIN(sa ^ sb, ma * mb, ea + eb),
+    (IME_FPX_FIN(sa, ma, ea), IME_FPX_FIN(sb, mb, eb)) => (zeros(), IME_FPX_FIN(sa ^ sb, ma * mb, ea + eb)),
   }
 
 // Exact sum. inf + -inf raises NV and yields NaN. An exact zero sum keeps
 // the sign of two equal-signed zeros; otherwise it is +0, or -0 under RDN
 // (IEEE 754 6.3). Example: (+3) + (-3) -> +0 (RNE), -0 (RDN).
-function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : int) -> ime_fpx =
+function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : int) -> (bits_fflags, ime_fpx) =
   match (a, b) {
-    (IME_FPX_NAN(), _) => IME_FPX_NAN(),
-    (_, IME_FPX_NAN()) => IME_FPX_NAN(),
+    (IME_FPX_NAN(), _) => (zeros(), IME_FPX_NAN()),
+    (_, IME_FPX_NAN()) => (zeros(), IME_FPX_NAN()),
     (IME_FPX_INF(sa), IME_FPX_INF(sb)) => {
-      if sa == sb then IME_FPX_INF(sa) else { accrue_fflags(nvFlag()); IME_FPX_NAN() }
+      if sa == sb then (zeros(), IME_FPX_INF(sa)) else (nvFlag(), IME_FPX_NAN())
     },
-    (IME_FPX_INF(sa), _) => IME_FPX_INF(sa),
-    (_, IME_FPX_INF(sb)) => IME_FPX_INF(sb),
+    (IME_FPX_INF(sa), _) => (zeros(), IME_FPX_INF(sa)),
+    (_, IME_FPX_INF(sb)) => (zeros(), IME_FPX_INF(sb)),
     (IME_FPX_FIN(sa, ma, ea), IME_FPX_FIN(sb, mb, eb)) => {
       let e = if ea < eb then ea else eb;
       let va = shl_int(ma, ea - e);
       let vb = shl_int(mb, eb - e);
       let sum = (if sa == 0b1 then negate(va) else va) + (if sb == 0b1 then negate(vb) else vb);
-      if sum > 0 then IME_FPX_FIN(0b0, sum, e)
-      else if sum < 0 then IME_FPX_FIN(0b1, negate(sum), e)
-      else if ma == 0 & mb == 0 & sa == sb then IME_FPX_FIN(sa, 0, e)
-      else if rm == IME_RM_RDN then IME_FPX_FIN(0b1, 0, e)
-      else IME_FPX_FIN(0b0, 0, e)
+      (zeros(),
+       if sum > 0 then IME_FPX_FIN(0b0, sum, e)
+       else if sum < 0 then IME_FPX_FIN(0b1, negate(sum), e)
+       else if ma == 0 & mb == 0 & sa == sb then IME_FPX_FIN(sa, 0, e)
+       else if rm == IME_RM_RDN then IME_FPX_FIN(0b1, 0, e)
+       else IME_FPX_FIN(0b0, 0, e))
     },
   }
 
@@ -216,19 +219,21 @@ function ime_fp_canonical_nan(f : ime_fp_fmt) -> bits(64) = {
   ime_fp_pack(f, 0b0, ime_pow2(ime_fmt_ebits(f)) - 1, shl_int(1, mbits - 1))
 }
 
-// Round an exact value to IEEE format f (FP16/BF16/FP32/FP64) under rm and
-// accrue NX/UF/OF. Returns the encoding zero-extended to 64 bits.
-function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> bits(64) = {
+// Round an exact value to IEEE format f (FP16/BF16/FP32/FP64) under rm.
+// Returns the NX/UF/OF flags the rounding raises and the encoding
+// zero-extended to 64 bits; the caller accrues the flags (see
+// ime_fp_decode_flags).
+function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> (bits_fflags, bits(64)) = {
   let mbits = ime_fmt_mbits(f);
   let bias = ime_fmt_bias(f);
   let emax_field = ime_pow2(ime_fmt_ebits(f)) - 1;
   let emin = 1 - bias;
 
   match x {
-    IME_FPX_NAN() => ime_fp_canonical_nan(f),
-    IME_FPX_INF(s) => ime_fp_pack(f, s, emax_field, 0),
+    IME_FPX_NAN() => (zeros(), ime_fp_canonical_nan(f)),
+    IME_FPX_INF(s) => (zeros(), ime_fp_pack(f, s, emax_field, 0)),
     IME_FPX_FIN(s, m, e) => {
-      if m == 0 then return ime_fp_pack(f, s, 0, 0);
+      if m == 0 then return (zeros(), ime_fp_pack(f, s, 0, 0));
 
       // Unbiased exponent of the leading one: value in [2^E, 2^(E+1)).
       let E = ime_bit_len(m) - 1 + e;
@@ -253,26 +258,38 @@ function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> bits(64) = {
 
       // Overflow: inf or the largest finite value, depending on rm and sign.
       if biased >= emax_field then {
-        accrue_fflags(ofFlag() | nxFlag());
         let to_inf = rm == IME_RM_RNE | rm == IME_RM_RMM |
                      (rm == IME_RM_RUP & s == 0b0) | (rm == IME_RM_RDN & s == 0b1);
-        return if to_inf
-               then ime_fp_pack(f, s, emax_field, 0)
-               else ime_fp_pack(f, s, emax_field - 1, ime_pow2(mbits) - 1)
+        return (ofFlag() | nxFlag(),
+                if to_inf
+                then ime_fp_pack(f, s, emax_field, 0)
+                else ime_fp_pack(f, s, emax_field - 1, ime_pow2(mbits) - 1))
       };
 
-      if inexact then accrue_fflags(if tiny then ufFlag() | nxFlag() else nxFlag());
-      ime_fp_pack(f, s, biased, frac)
+      (if inexact then (if tiny then ufFlag() | nxFlag() else nxFlag()) else zeros(),
+       ime_fp_pack(f, s, biased, frac))
     },
   }
 }
 
 // fp_add / fp_mul of the specification: operands and result in format f.
-function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> bits(64) =
-  ime_fp_round(f, ime_fpx_add(ime_fp_decode_flags(f, a), ime_fp_decode_flags(f, b), rm), rm)
+// Returns the NV/NX/UF/OF flags the operation raises together with the
+// result; the caller accrues them (see ime_fp_decode_flags).
+function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> (bits_fflags, bits(64)) = {
+  let (fa, xa) = ime_fp_decode_flags(f, a);
+  let (fb, xb) = ime_fp_decode_flags(f, b);
+  let (fadd, sum) = ime_fpx_add(xa, xb, rm);
+  let (fround, r) = ime_fp_round(f, sum, rm);
+  (fa | fb | fadd | fround, r)
+}
 
-function ime_fp_mul(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> bits(64) =
-  ime_fp_round(f, ime_fpx_mul(ime_fp_decode_flags(f, a), ime_fp_decode_flags(f, b)), rm)
+function ime_fp_mul(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> (bits_fflags, bits(64)) = {
+  let (fa, xa) = ime_fp_decode_flags(f, a);
+  let (fb, xb) = ime_fp_decode_flags(f, b);
+  let (fmul, prod) = ime_fpx_mul(xa, xb);
+  let (fround, r) = ime_fp_round(f, prod, rm);
+  (fa | fb | fmul | fround, r)
+}
 
 // Exact value of an integer. Example: -3 -> (-, 3, 0).
 function ime_fpx_of_int(v : int) -> ime_fpx =

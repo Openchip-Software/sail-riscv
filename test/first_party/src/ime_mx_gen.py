@@ -323,11 +323,17 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
                     if lo > hi:
                         continue
                     for g0 in range((lo - slo) // g.W, (hi - slo) // g.W + 1):
-                        S = ("fin", 0, Fraction(0))
-                        for k in range(slo + g0 * g.W, slo + g0 * g.W + g.W):
+                        # The sum starts from the first product, not a
+                        # literal +0: a W=1 group is the exact product
+                        # (S:1532-1533), and adding it to +0 would turn a
+                        # -0 product into +0 under round-to-nearest-even.
+                        ks = range(slo + g0 * g.W, slo + g0 * g.W + g.W)
+                        S = None
+                        for k in ks:
                             a = dec_flags(fa, get_elem(A, g.eew_a, g.a_idx(i, k)), fl)
                             b = dec_flags(fb, get_elem(B, g.eew_a, g.b_idx(k, j)), fl)
-                            S = add(S, mul(a, b, fl), rm, fl)
+                            prod = mul(a, b, fl)
+                            S = prod if S is None else add(S, prod, rm, fl)
                         if scaled:
                             S = mul(S, blk, fl)
                         acc = fp_add(fc, acc, rnd(fc, S, rm, fl), rm, fl)
@@ -833,6 +839,18 @@ def special_cases(rng):
         set_scale(g, v0, 0, 0, scale_a=0xFE)
         set_scale(g, v0, 1, 0, scale_b=0xFE)
 
+    def neg_zero_sum(g, A, B, C, v0):
+        """C[0][0] = -0 and every A[0][k]*B[k][0] product (k=0..K-1) is
+        exactly -0 (A=+0, B=-1.0 fp16). A W=1 group is a single product,
+        not a sum starting from a literal +0 (S:1532-1533), so C[0][0]
+        stays -0 under round-to-nearest-even instead of becoming +0."""
+        neg_one = pack("fp16", 1, bias("fp16"), 0)
+        neg_zero = pack("fp16", 1, 0, 0)
+        for k in range(g.K):
+            put_elem(A, g.eew_a, g.a_idx(0, k), 0)
+            put_elem(B, g.eew_a, g.b_idx(k, 0), neg_one)
+        put_elem(C, g.sew, g.c_idx(0, 0), neg_zero)
+
     e5 = (1, 1, 0)
     return [
         build_case(rng, 2, 16, e5, "bs16", RNE, mutate=nan_scale, note="nan-scale"),
@@ -880,6 +898,16 @@ def special_cases(rng):
             int_inputs=True,
             mutate=double_round_int,
             note="exact-scale",
+        ),
+        build_case(
+            rng,
+            1,
+            16,
+            (0, 0, 0),
+            "vm1",
+            RNE,
+            mutate=neg_zero_sum,
+            note="neg-zero-sum",
         ),
     ]
 
