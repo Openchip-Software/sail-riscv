@@ -1,16 +1,18 @@
 #include "common/encoding.h"
 
-# VL=0 is legal for all tile loads/stores, including the transposing
-# forms. A VL that is not a multiple of lambda * LMUL, even one below
-# lambda * LMUL, does not trap
-# (pending IME TG rule: largest multiple of lambda * LMUL that fits VL).
+# VL shall be a multiple of effective_lambda * LMUL; a VL that is not raises
+# an illegal-instruction exception (spec S:2700-2713). VL=0 is a multiple of
+# any linesize, so it stays a legal no-op.
 #
 # Geometry: VLEN=256, SEW=32, LMUL=1, lambda=2 (L2) => linesize=2; LD=2.
 #
-# 1. VL=3: vmtl.v, vmttl.v, vmts.v and vmtts.v do not trap.
+# 1. VL=3: vmtl.v, vmttl.v, vmts.v and vmtts.v trap with mcause=2.
 # 2. VL=4: vmtl.v does not trap (control).
 # 3. VL=0: vmttl.v and vmtts.v do not trap.
-# 4. VL=1 (below one line): vmttl.v and vmtts.v do not trap.
+# 4. VL=1 (below one line): vmttl.v and vmtts.v trap with mcause=2.
+# 5. VLEN=256, SEW=32: lambda=4 (L4) is not permissible (EMUL_C would be
+#    256/(32*16), not an integer in {1,2,4,8,16}), so the exact
+#    instruction-immediate lambda traps regardless of VL.
 
 .global main
 main:
@@ -33,19 +35,26 @@ main:
     li s1, 0
     # vmtl.v v8, (a0), a1, L2
     .word 0x52b57407
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
+    li s1, 0
     # vmttl.v v8, (a0), a1, L2
     .word 0x56b57407
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
+    li s1, 0
     # vmts.v v8, (a0), a1, L2
     .word 0x52b57427
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
+    li s1, 0
     # vmtts.v v8, (a0), a1, L2
     .word 0x56b57427
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
     # ---- 2. VL = 4 (two whole lines) ----
     vsetivli t0, 4, e32, m1, ta, ma
@@ -67,13 +76,25 @@ main:
 
     # ---- 4. VL = 1 (partial line only) ----
     vsetivli t0, 1, e32, m1, ta, ma
+    li s1, 0
     # vmttl.v v8, (a0), a1, L2
     .word 0x56b57407
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
+    li s1, 0
     # vmtts.v v8, (a0), a1, L2
     .word 0x56b57427
-    bnez s1, fail
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
+
+    # ---- 5. lambda=4 is not permissible at SEW=32, VLEN=256 ----
+    vsetivli t0, 4, e32, m1, ta, ma
+    li s1, 0
+    # vmtl.v v8, (a0), a1, L4
+    .word 0x72b57407
+    li t1, CAUSE_ILLEGAL_INSTRUCTION
+    bne s1, t1, fail
 
     li a0, 0
     mv ra, t6
