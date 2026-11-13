@@ -32,19 +32,28 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
   let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
+  let LMUL = ime_lmul_value_nat(LMUL_pow);
+  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
+  let linesize = lambda_nat * LMUL;
+
   if not(valid_vtype()) |
      illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vd, EMUL_pow)) |
      not(valid_rd_mask(vd, vm)) |
+     // The exact instruction-immediate lambda, or vtype.lambda when the
+     // immediate is 000, must be permissible for this (VLEN, SEW); it is
+     // not WARL-clamped (spec S:2700-2713).
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
-     lambda_value == 0
+     lambda_value == 0 |
+     linesize == 0
   then return Illegal_Instruction();
 
-  let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
-  let cols = lambda_nat * LMUL;
-  if cols == 0 then return Illegal_Instruction();
-  assert(lambda_nat > 0);
+  // VL shall be a multiple of effective_lambda * LMUL (spec S:2700-2713,
+  // `decode_tile_ls_geometry`). linesize > 0 was just established above.
+  assert(linesize > 0);
+  if unsigned(vl) % linesize != 0 then return Illegal_Instruction();
+
+  let cols = linesize;
 
   // A zero value in rs2 (x0 or any register holding 0) selects the natural
   // leading dimension: lambda*LMUL for the order-preserving traversal,
@@ -127,18 +136,27 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
   let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
+  let LMUL = ime_lmul_value_nat(LMUL_pow);
+  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
+  let linesize = lambda_nat * LMUL;
+
   if not(valid_vtype()) |
      illegal_vstart(VSTART_LOAD_STORE, num_elem, EMUL_pow) |
      not(valid_reg_group(vs3, EMUL_pow)) |
+     // The exact instruction-immediate lambda, or vtype.lambda when the
+     // immediate is 000, must be permissible for this (VLEN, SEW); it is
+     // not WARL-clamped (spec S:2700-2713).
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
-     lambda_value == 0
+     lambda_value == 0 |
+     linesize == 0
   then return Illegal_Instruction();
 
-  let LMUL = ime_lmul_value_nat(LMUL_pow);
-  let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
-  let cols = lambda_nat * LMUL;
-  if cols == 0 then return Illegal_Instruction();
-  assert(lambda_nat > 0);
+  // VL shall be a multiple of effective_lambda * LMUL (spec S:2700-2713,
+  // `decode_tile_ls_geometry`). linesize > 0 was just established above.
+  assert(linesize > 0);
+  if unsigned(vl) % linesize != 0 then return Illegal_Instruction();
+
+  let cols = linesize;
 
   // A zero value in rs2 (x0 or any register holding 0) selects the natural
   // leading dimension: lambda*LMUL for the order-preserving traversal,
