@@ -316,8 +316,12 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
   // instruction exception for any nonzero vstart (S:1272, S:5463). That
   // class ignores num_elem/EMUL_pow; operand A's LMUL-aligned register
   // group is passed only to match illegal_vstart's signature.
+  // The Int64 accumulator rows (Zvvi8i64mm, Zvvi16i64mm, Zvvi32i64mm,
+  // Zvvi64mm, tbl-extensions S:808-843) additionally require Zve64x; Zvvmm
+  // itself only requires Zve32x (ime_types.sail).
   if vm != 0b1 |
      not(currentlyEnabled(Ext_Zvvmm)) |
+     (SEW == 64 & not(currentlyEnabled(Ext_Zve64x))) |
      not(valid_vtype()) |
      illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
      lambda_value == 0 |

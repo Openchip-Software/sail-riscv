@@ -357,6 +357,11 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
   let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
   let zvvfmm = currentlyEnabled(Ext_Zvvfmm);
+  // The coarse Zvvfmm family flag requires only Zve32f (ime_types.sail), so
+  // every row whose C type is FP64 additionally requires Zve64d here
+  // (tbl-extensions S:808-843: Zvvofp8fp64mm, Zvvfp16fp64mm, Zvvfp32fp64mm,
+  // Zvvfp64mm all depend on Zve64d, not Zve32f).
+  let zve64d = currentlyEnabled(Ext_Zve64d);
   match (W, SEW) {
     // FP16 x FP16 -> FP16 and BF16 x BF16 -> BF16 are legal; FP16 x FP16 ->
     // BF16 and BF16 x BF16 -> FP16 are reserved. A mixed FP16/BF16 input
@@ -364,11 +369,11 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
     (1, 16) => zvvfmm & (if same_inputs then vtype[altfmt] == vtype[altfmt_A] else true),
     // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1490-1494).
     (1, 32) => not(bf16_c) & zvvfmm,
-    (1, 64) => not(bf16_c) & zvvfmm,
+    (1, 64) => not(bf16_c) & zvvfmm & zve64d,
     // FP16/BF16 -> FP32, FP32 -> FP64 (altfmt_A/altfmt_B ignored), FP16/BF16 -> FP64.
     (2, 32) => not(bf16_c) & zvvfmm,
-    (2, 64) => not(bf16_c) & zvvfmm,
-    (4, 64) => not(bf16_c) & zvvfmm,
+    (2, 64) => not(bf16_c) & zvvfmm & zve64d,
+    (4, 64) => not(bf16_c) & zvvfmm & zve64d,
     // OFP8 -> FP16/BF16, OFP4 -> FP16/BF16, OFP8 -> FP32.
     (2, 16) => if bf16_c then ime_fp_base_ext_ok(Ext_Zvvxofp8bf16mm, Ext_Zvvxnofp8bf16mm)
                else ime_fp_base_ext_ok(Ext_Zvvxofp8fp16mm, Ext_Zvvxnofp8fp16mm),
@@ -378,7 +383,7 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
     (4, 32) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp32mm, Ext_Zvvxnofp8fp32mm),
     // OFP4 -> FP32, OFP8 -> FP64.
     (8, 32) => default_inputs & not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp4fp32mm, Ext_Zvvxnofp4fp32mm),
-    (8, 64) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp64mm, Ext_Zvvxnofp8fp64mm),
+    (8, 64) => not(bf16_c) & ime_fp_base_ext_ok(Ext_Zvvxofp8fp64mm, Ext_Zvvxnofp8fp64mm) & zve64d,
     _       => false,
   }
 }
