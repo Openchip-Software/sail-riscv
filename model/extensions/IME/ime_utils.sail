@@ -3,7 +3,39 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
 
+// Any individual floating-point computational extension (tbl-extensions,
+// the 18 Zvvmm-family members whose currentlyEnabled clause also accepts
+// Ext_Zvvfmm). A decode guard that accepts this function alongside
+// Ext_Zvvfmm therefore decodes an encoding whose cell belongs to exactly one
+// member extension even when Zvvfmm itself is not enabled. The execute
+// function still rejects the encoding when the enabled member does not
+// cover that (W, SEW) cell (ime_fp_base_row_ok in ime_mx.sail).
+function ime_fp_base_any_enabled() -> bool =
+  currentlyEnabled(Ext_Zvvbf16mm) |
+  currentlyEnabled(Ext_Zvvbf16fp32mm) |
+  currentlyEnabled(Ext_Zvvbf16fp64mm) |
+  currentlyEnabled(Ext_Zvvfp16mm) |
+  currentlyEnabled(Ext_Zvvfp16fp32mm) |
+  currentlyEnabled(Ext_Zvvfp16fp64mm) |
+  currentlyEnabled(Ext_Zvvfp32mm) |
+  currentlyEnabled(Ext_Zvvfp32fp64mm) |
+  currentlyEnabled(Ext_Zvvfp64mm) |
+  currentlyEnabled(Ext_Zvvofp8mm) |
+  currentlyEnabled(Ext_Zvvofp8bf16mm) |
+  currentlyEnabled(Ext_Zvvofp8fp16mm) |
+  currentlyEnabled(Ext_Zvvofp8fp32mm) |
+  currentlyEnabled(Ext_Zvvofp8fp64mm) |
+  currentlyEnabled(Ext_Zvvofp4bf16mm) |
+  currentlyEnabled(Ext_Zvvofp4fp16mm) |
+  currentlyEnabled(Ext_Zvvofp4fp32mm) |
+  currentlyEnabled(Ext_Zvvofp4ofp8mm)
+
 // Any floating-point-input microscaling (Zvvxofp*/Zvvxnofp*) extension.
+// Ext_Zvvxofp4ofp8mm and Ext_Zvvxnofp4ofp8mm name an OFP8 accumulator row
+// that ime_fp_mx_row_ok does not recognize yet (deferred to block C3), so
+// enabling only one of the two still traps in execute_ime_fp_engine. They
+// are listed here anyway, because the decode guard has to accept the
+// encoding for execute_ime_fp_engine to reach that per-cell check.
 function ime_fp_mx_any_enabled() -> bool =
   currentlyEnabled(Ext_Zvvxofp4fp16mm) |
   currentlyEnabled(Ext_Zvvxnofp4fp16mm) |
@@ -18,7 +50,29 @@ function ime_fp_mx_any_enabled() -> bool =
   currentlyEnabled(Ext_Zvvxofp4fp32mm) |
   currentlyEnabled(Ext_Zvvxnofp4fp32mm) |
   currentlyEnabled(Ext_Zvvxofp8fp64mm) |
-  currentlyEnabled(Ext_Zvvxnofp8fp64mm)
+  currentlyEnabled(Ext_Zvvxnofp8fp64mm) |
+  currentlyEnabled(Ext_Zvvxofp4ofp8mm) |
+  currentlyEnabled(Ext_Zvvxnofp4ofp8mm)
+
+// Any individual integer computational extension (tbl-extensions, the 13
+// Zvvmm-family members whose currentlyEnabled clause also accepts
+// Ext_Zvvmm). See ime_fp_base_any_enabled for why a decode guard can accept
+// this function instead of resolving the specific member: the per-cell
+// check lives in execute_ime_int_mmacc (ime_int_row_ok in ime_mx.sail).
+function ime_int_base_any_enabled() -> bool =
+  currentlyEnabled(Ext_Zvvi4i8mm) |
+  currentlyEnabled(Ext_Zvvi4i16mm) |
+  currentlyEnabled(Ext_Zvvi4i32mm) |
+  currentlyEnabled(Ext_Zvvi8mm) |
+  currentlyEnabled(Ext_Zvvi8i16mm) |
+  currentlyEnabled(Ext_Zvvi8i32mm) |
+  currentlyEnabled(Ext_Zvvi8i64mm) |
+  currentlyEnabled(Ext_Zvvi16mm) |
+  currentlyEnabled(Ext_Zvvi16i32mm) |
+  currentlyEnabled(Ext_Zvvi16i64mm) |
+  currentlyEnabled(Ext_Zvvi32mm) |
+  currentlyEnabled(Ext_Zvvi32i64mm) |
+  currentlyEnabled(Ext_Zvvi64mm)
 
 // Any integer-input microscaling (Zvvxi*/Zvvxni*) extension.
 function ime_int_mx_any_enabled() -> bool =
@@ -42,7 +96,9 @@ function ime_vtype_fields_enabled() -> bool =
   currentlyEnabled(Ext_Zvvmtls) |
   currentlyEnabled(Ext_Zvvmttls) |
   currentlyEnabled(Ext_Zvvfmm) |
+  ime_fp_base_any_enabled() |
   ime_fp_mx_any_enabled() |
+  ime_int_base_any_enabled() |
   ime_int_mx_any_enabled()
 
 function ime_lambda_field_to_value(field : bits(3)) -> int =

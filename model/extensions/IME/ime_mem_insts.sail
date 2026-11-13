@@ -350,7 +350,7 @@ union clause instruction = IMEVMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111000 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm)
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_base_any_enabled()
 
 mapping clause assembly = IMEVMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -367,7 +367,7 @@ union clause instruction = IMEVWMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVWMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111001 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_base_any_enabled() | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEVWMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "vwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -389,7 +389,7 @@ union clause instruction = IMEVQMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVQMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111010 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_base_any_enabled() | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEVQMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "vqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -412,7 +412,7 @@ union clause instruction = IMEV8WMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEV8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111011 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvmm) | ime_int_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvmm) | ime_int_base_any_enabled() | ime_int_mx_any_enabled()
 
 mapping clause assembly = IMEV8WMMACCTYPE(0b1, vs2, vs1, vd)
   <-> "v8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
@@ -451,7 +451,7 @@ union clause instruction = IMEVFMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010100 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm)
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_base_any_enabled()
 
 mapping clause assembly = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vfmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -466,7 +466,7 @@ union clause instruction = IMEVFWMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010101 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_base_any_enabled() | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVFWMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vfwmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -481,7 +481,7 @@ union clause instruction = IMEVFQMMACCTYPE : (bits(1), vregidx, vregidx, vregidx
 
 mapping clause encdec = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010110 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_base_any_enabled() | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVFQMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vfqmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
@@ -497,7 +497,7 @@ union clause instruction = IMEVF8WMMACCTYPE : (bits(1), vregidx, vregidx, vregid
 
 mapping clause encdec = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010111 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
-  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_mx_any_enabled()
+  when currentlyEnabled(Ext_Zvvfmm) | ime_fp_base_any_enabled() | ime_fp_mx_any_enabled()
 
 mapping clause assembly = IMEVF8WMMACCTYPE(vm, vs2, vs1, vd)
   <-> "vf8wmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
