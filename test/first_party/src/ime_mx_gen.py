@@ -870,6 +870,33 @@ def special_cases(rng):
         set_scale(g, v0, 0, 0, scale_a=0x00)
         set_scale(g, v0, 2, 0, scale_b=0xFE)
 
+    def scale_rtz_max_finite(g, A, B, C, v0):
+        """E8M0 0xFE (2^127) converts to FP16's maximum finite value 65504
+        under round-towards-zero, not +inf (contrast scale_ovf and
+        zero_times_inf_scale, both round-to-nearest-even or round-up).
+        Row 0's scale_A is 0xFE; every scale_B is the E8M0 field for
+        2^0 = 1.0, so the combined block scale at every row-0 element is
+        exactly 65504, not infinite. A[0][0] and B[0][0] are 1.0 (E5M2),
+        every other A/B element is 0, so the scaled term at C[0][0] is
+        exactly 65504 added to an initial C of 0: the result distinguishes
+        the maximum finite value from +inf, which an infinite scale would
+        give instead. Every other output element's scaled term is exactly
+        0 (zero times the finite 65504, not zero times infinity), so those
+        elements keep their initial random C value unchanged."""
+        for i in range(g.M):
+            for k in range(g.K):
+                put_elem(A, g.eew_a, g.a_idx(i, k), 0)
+        for j in range(g.M):
+            for k in range(g.K):
+                put_elem(B, g.eew_a, g.b_idx(k, j), 0)
+        one = pack("e5m2", 0, bias("e5m2"), 0)
+        put_elem(A, g.eew_a, g.a_idx(0, 0), one)
+        put_elem(B, g.eew_a, g.b_idx(0, 0), one)
+        put_elem(C, g.sew, g.c_idx(0, 0), 0)
+        for p in range(VLEN // 16):
+            put_elem(v0, 16, p, E8M0_BIAS | (E8M0_BIAS << 8))
+        set_scale(g, v0, 0, 0, scale_a=0xFE)
+
     def int_overflow(g, A, B, C, v0):
         """dot(0,0) = 5 * 127 * 127 = 80645 > 65504 (FP16 max): int_to_fp
         rounds the exact dot to FP16 before scaling and overflows to +inf,
@@ -933,6 +960,16 @@ def special_cases(rng):
             RNE,
             mutate=zero_times_inf_scale,
             note="zero-times-inf-scale",
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            e5,
+            "bs32",
+            RTZ,
+            mutate=scale_rtz_max_finite,
+            note="scale-rtz-max-finite",
         ),
         build_case(
             rng,
@@ -1357,6 +1394,11 @@ def main():
             "    scale_B of column 2 converts to +inf (E8M0 0xFE); their fmt_C product\n"
             "    at C[0][2] is the default NaN, NV (S:2008-2027), even though both\n"
             "    encoded E8M0 scales are finite.\n"
+            "  scale-rtz-max-finite: the same E8M0 0xFE (2^127) as zero-times-inf-scale\n"
+            "    and scale-ovf, but under round-towards-zero it converts to FP16's\n"
+            "    maximum finite value 65504, OF|NX, instead of +inf; paired with a 1.0\n"
+            "    scale_B and a single 1.0 x 1.0 product, C[0][0] = 65504 exactly,\n"
+            "    distinguishing the maximum finite value from +inf.\n"
             "  int-overflow: an exact MXINT8 dot product of 80645 overflows FP16 (OF)\n"
             "    in int_to_fp, before it is multiplied by the (here unit) block scale.\n"
             "  bf16-ovf: 0xFE x 0xFE converts to +inf in BF16 at the fmt_C scale\n"
