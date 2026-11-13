@@ -431,6 +431,18 @@ foreach (xlen IN ITEMS 32 64)
         --lean-non-beq-type HartState
         --lean-non-beq-type ExecutionResult
         --lean-non-beq-type Step
+        # currentlyEnabled is already proven terminating by Sail's own type
+        # checker (the extension family/dependency graph is acyclic by
+        # construction: a family or sibling extension never recurses back
+        # into one of the members it implies). The auto-derived Lean
+        # well-founded-recursion measure fails to prove this on its own
+        # once the IME Zvvm extensions bring the clause count to 204,
+        # reporting e.g. "failed to prove termination
+        # ... currentlyEnabled_measure Ext_Zve32f ... <
+        # currentlyEnabled_measure Ext_Zvvbf16fp32mm" for a clause shape
+        # that is otherwise identical to pre-existing, passing clauses
+        # (Ext_Zvfhmin, Ext_Zvkb).
+        --lean-partial-function currentlyEnabled
     )
     set(lean_sail_default
         --lean-noncomputable
