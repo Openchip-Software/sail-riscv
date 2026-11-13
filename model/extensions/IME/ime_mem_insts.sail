@@ -341,14 +341,19 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
 // vmmacc.vv — non-widening integer matrix multiply-accumulate.
 // This is the first concrete member of the common IME GEMM family described
 // in the specification's Sail starting point under integrated-matrix-insns.
+// `vm=0` is reserved (S:1257, S:7378) and execute_ime_int_mmacc raises
+// illegal instruction for it, but the assembly mapping still covers it so
+// disassembly of the reserved encoding does not hit an unmatched mapping
+// clause; it prints with the same `, v0.scale` suffix as the other vm=0 MX
+// forms below.
 union clause instruction = IMEVMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b111000 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b000 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvmm)
 
-mapping clause assembly = IMEVMMACCTYPE(0b1, vs2, vs1, vd)
-  <-> "vmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
+mapping clause assembly = IMEVMMACCTYPE(vm, vs2, vs1, vd)
+  <-> "vmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
 
 function clause execute IMEVMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(1, vm, vs2, vs1, vd)
@@ -437,15 +442,19 @@ function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregid
 
 // vfmmacc.vv — non-widening (W=1) floating-point matrix multiply-accumulate.
 // A, B, and C are all SEW-bit IEEE floating-point values. `vm=1` selects the
-// unscaled form; `vm=0` is reserved and raises illegal instruction.
+// unscaled form; `vm=0` is reserved (S:1347) and execute_ime_fp_mmacc raises
+// illegal instruction for it. The assembly mapping still covers it so
+// disassembly of the reserved encoding does not hit an unmatched mapping
+// clause; it prints with the same `, v0.scale` suffix as the other vm=0 MX
+// forms below.
 union clause instruction = IMEVFMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
   <-> 0b010100 @ vm @ encdec_vreg(vs2) @ encdec_vreg(vs1) @ 0b001 @ encdec_vreg(vd) @ 0b1010111
   when currentlyEnabled(Ext_Zvvfmm)
 
-mapping clause assembly = IMEVFMMACCTYPE(0b1, vs2, vs1, vd)
-  <-> "vfmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2)
+mapping clause assembly = IMEVFMMACCTYPE(vm, vs2, vs1, vd)
+  <-> "vfmmacc.vv" ^ spc() ^ vreg_name(vd) ^ sep() ^ vreg_name(vs1) ^ sep() ^ vreg_name(vs2) ^ maybe_ime_vscale(vm)
 
 function clause execute IMEVFMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_fp_mmacc(1, vm, vs2, vs1, vd)
