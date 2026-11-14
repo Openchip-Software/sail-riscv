@@ -1,7 +1,7 @@
 #include "common/encoding.h"
 
 # VL shall be a multiple of effective_lambda * LMUL; a VL that is not raises
-# an illegal-instruction exception (spec S:2700-2713). VL=0 is a multiple of
+# an illegal-instruction exception (spec S:2707-2720). VL=0 is a multiple of
 # any linesize, so it stays a legal no-op.
 #
 # Geometry: VLEN=256, SEW=32, LMUL=1, lambda=2 (L2) => linesize=2; LD=2.

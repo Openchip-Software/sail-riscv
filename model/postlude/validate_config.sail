@@ -1024,7 +1024,7 @@ private function check_misc_extension_dependencies() -> bool = {
 // Zvvmtls, and Zvvmttls require only Zve32x; Zvvfmm and every microscaling
 // extension read vtype.altfmt_A/altfmt_B, read frm, and write fflags, so
 // they require Zve32f (tbl-extensions S:808-843, tbl-mx-extensions
-// S:7164-7206). The *fp64mm microscaling extensions require Zve64d instead.
+// S:7150-7192). The *fp64mm microscaling extensions require Zve64d instead.
 private function check_ime_extension_dependencies() -> bool = {
   var valid : bool = true;
   if (config extensions.Zvvmm.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
@@ -1157,7 +1157,7 @@ private function check_ime_extension_dependencies() -> bool = {
   };
   // The 31 individual computational extensions (tbl-extensions S:808-843)
   // and the 2 new OFP4->OFP8 microscaling extensions (tbl-mx-extensions
-  // S:7164-7206; execution is not implemented until C3).
+  // S:7150-7192; execution is not implemented until C3).
   if (config extensions.Zvvi4i8mm.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
     valid = false;
     print_endline("The Zvvi4i8mm extension is enabled but Zve32x is disabled: supporting Zvvi4i8mm requires Zve32x.");

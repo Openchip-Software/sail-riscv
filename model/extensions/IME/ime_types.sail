@@ -14,7 +14,7 @@ let IME_EMUL_C_MAX = 16
 // microscaling extension implies its matching BS=32 (x) extension; an
 // FP-input (x) microscaling extension implies its base extension (the
 // integer-input microscaling extensions imply no base extension, per
-// tbl-mx-extensions S:7158-7160).
+// tbl-mx-extensions S:7144-7146).
 function clause currentlyEnabled(Ext_Zvvbf16fp32mm) =
   (hartSupports(Ext_Zvvbf16fp32mm) & currentlyEnabled(Ext_Zve32f)) |
   currentlyEnabled(Ext_Zvvfmm)

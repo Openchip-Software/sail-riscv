@@ -42,13 +42,13 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
      not(valid_rd_mask(vd, vm)) |
      // The exact instruction-immediate lambda, or vtype.lambda when the
      // immediate is 000, must be permissible for this (VLEN, SEW); it is
-     // not WARL-clamped (spec S:2700-2713).
+     // not WARL-clamped (spec S:2707-2720).
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0 |
      linesize == 0
   then return Illegal_Instruction();
 
-  // VL shall be a multiple of effective_lambda * LMUL (spec S:2700-2713,
+  // VL shall be a multiple of effective_lambda * LMUL (spec S:2707-2720,
   // `decode_tile_ls_geometry`). linesize > 0 was just established above.
   assert(linesize > 0);
   if unsigned(vl) % linesize != 0 then return Illegal_Instruction();
@@ -145,13 +145,13 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
      not(valid_reg_group(vs3, EMUL_pow)) |
      // The exact instruction-immediate lambda, or vtype.lambda when the
      // immediate is 000, must be permissible for this (VLEN, SEW); it is
-     // not WARL-clamped (spec S:2700-2713).
+     // not WARL-clamped (spec S:2707-2720).
      not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
      lambda_value == 0 |
      linesize == 0
   then return Illegal_Instruction();
 
-  // VL shall be a multiple of effective_lambda * LMUL (spec S:2700-2713,
+  // VL shall be a multiple of effective_lambda * LMUL (spec S:2707-2720,
   // `decode_tile_ls_geometry`). linesize > 0 was just established above.
   assert(linesize > 0);
   if unsigned(vl) % linesize != 0 then return Illegal_Instruction();
@@ -313,7 +313,7 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
   if vm == 0b0 & W != 1 then return execute_ime_int_mx(W, vs1, vs2, vd);
 
   // vstart is VSTART_MANDATORY: the specification requires an illegal
-  // instruction exception for any nonzero vstart (S:1272, S:5463). That
+  // instruction exception for any nonzero vstart (S:1272, S:5449). That
   // class ignores num_elem/EMUL_pow; operand A's LMUL-aligned register
   // group is passed only to match illegal_vstart's signature.
   // ime_int_row_ok checks the individual extension named by
@@ -341,7 +341,7 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
 // vmmacc.vv — non-widening integer matrix multiply-accumulate.
 // This is the first concrete member of the common IME GEMM family described
 // in the specification's Sail starting point under integrated-matrix-insns.
-// `vm=0` is reserved (S:1257, S:7378) and execute_ime_int_mmacc raises
+// `vm=0` is reserved (S:1257, S:7364) and execute_ime_int_mmacc raises
 // illegal instruction for it, but the assembly mapping still covers it so
 // disassembly of the reserved encoding does not hit an unmatched mapping
 // clause; it prints with the same `, v0.scale` suffix as the other vm=0 MX
@@ -442,7 +442,7 @@ function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregid
 
 // vfmmacc.vv — non-widening (W=1) floating-point matrix multiply-accumulate.
 // A, B, and C are all SEW-bit IEEE floating-point values. `vm=1` selects the
-// unscaled form; `vm=0` is reserved (S:1347) and execute_ime_fp_mmacc raises
+// unscaled form; `vm=0` is reserved (S:1346) and execute_ime_fp_mmacc raises
 // illegal instruction for it. The assembly mapping still covers it so
 // disassembly of the reserved encoding does not hit an unmatched mapping
 // clause; it prints with the same `, v0.scale` suffix as the other vm=0 MX

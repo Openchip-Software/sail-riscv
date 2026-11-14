@@ -189,7 +189,7 @@ function ime_fp_group_term(g : ime_gemm_geom, i : nat, j : nat, k : nat,
 // fp_group_sum (psm=0): exact sum of A[i,k] * B^T[k,j] for k in [k_lo,
 // k_hi]. The sum starts from the first product rather than a literal +0 so
 // a single-term group (W=1) keeps that product's sign exactly, including
-// -0 (spec S:1532-1533: a W=1 sub-dot-product is the exact product; adding
+// -0 (spec S:1531-1532: a W=1 sub-dot-product is the exact product; adding
 // it to +0 would turn a -0 product into +0 under round-to-nearest-even).
 function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi : nat,
                           fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, rm : int,
@@ -333,7 +333,7 @@ function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
 // Which extension(s) an FP16/BF16-input row requires (tbl-fp-encoding-map):
 // matching inputs require only the extension for that input format; a
 // mixed FP16/BF16 input pair requires both extensions, whatever the C
-// format (S:7238-7239, "a cell that names more than one extension requires
+// format (S:7224-7225, "a cell that names more than one extension requires
 // all named extensions").
 function ime_fp16bf16_ext_ok(fp16_ext : extension, bf16_ext : extension,
                              same_inputs : bool, bf16_in : bool) -> bool =
@@ -355,10 +355,10 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
     // FP16 x FP16 -> FP16 and BF16 x BF16 -> BF16 are legal; FP16 x FP16 ->
     // BF16 and BF16 x BF16 -> FP16 are reserved (the C format shall match
     // the input format when the inputs match). A mixed FP16/BF16 input
-    // pair is legal into either C format (S:7250-7270).
+    // pair is legal into either C format (S:7236-7256).
     (1, 16) => ime_fp16bf16_ext_ok(Ext_Zvvfp16mm, Ext_Zvvbf16mm, same_inputs, bf16_in) &
                (if same_inputs then bf16_c == bf16_in else true),
-    // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1490-1494).
+    // FP32 and FP64 inputs ignore altfmt_A/altfmt_B (S:1127, S:1489-1493).
     (1, 32) => not(bf16_c) & currentlyEnabled(Ext_Zvvfp32mm),
     // Zvvfp64mm's currentlyEnabled clause is also true when Zvvfmm is
     // enabled, and Zvvfmm's own dependency is Zve32f, not Zve64d: the
@@ -475,7 +475,7 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
   let SEW = get_sew();
   let rm_3b = fcsr[FRM];
   // vstart is VSTART_MANDATORY: the specification requires an illegal
-  // instruction exception for any nonzero vstart (S:1272, S:5463). That
+  // instruction exception for any nonzero vstart (S:1272, S:5449). That
   // class ignores num_elem/EMUL_pow; operand A's LMUL-aligned register
   // group is passed only to match illegal_vstart's signature.
   let LMUL_pow = get_lmul_pow();
