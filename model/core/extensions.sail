@@ -862,6 +862,41 @@ function currentlyEnabled_measure(ext : extension) -> int =
 
     Ext_Zhinxmin => 12, // > Zhinx
 
+    // IME (Zvvm) family. Each extension's clause calls only Zve32x,
+    // Zve32f, or Zve64d (value 4 at most), so value 5 covers all of them.
+    Ext_Zvvfmm => 5,
+    Ext_Zvvmm => 5,
+    Ext_Zvvmtls => 5,
+    Ext_Zvvmttls => 5,
+    Ext_Zvvxi4bf16mm => 5,
+    Ext_Zvvxi4fp16mm => 5,
+    Ext_Zvvxi4fp32mm => 5,
+    Ext_Zvvxi8bf16mm => 5,
+    Ext_Zvvxi8fp16mm => 5,
+    Ext_Zvvxi8fp32mm => 5,
+    Ext_Zvvxi8fp64mm => 5,
+    Ext_Zvvxni4bf16mm => 5,
+    Ext_Zvvxni4fp16mm => 5,
+    Ext_Zvvxni4fp32mm => 5,
+    Ext_Zvvxni8bf16mm => 5,
+    Ext_Zvvxni8fp16mm => 5,
+    Ext_Zvvxni8fp32mm => 5,
+    Ext_Zvvxni8fp64mm => 5,
+    Ext_Zvvxnofp4bf16mm => 5,
+    Ext_Zvvxnofp4fp16mm => 5,
+    Ext_Zvvxnofp4fp32mm => 5,
+    Ext_Zvvxnofp8bf16mm => 5,
+    Ext_Zvvxnofp8fp16mm => 5,
+    Ext_Zvvxnofp8fp32mm => 5,
+    Ext_Zvvxnofp8fp64mm => 5,
+    Ext_Zvvxofp4bf16mm => 5,
+    Ext_Zvvxofp4fp16mm => 5,
+    Ext_Zvvxofp4fp32mm => 5,
+    Ext_Zvvxofp8bf16mm => 5,
+    Ext_Zvvxofp8fp16mm => 5,
+    Ext_Zvvxofp8fp32mm => 5,
+    Ext_Zvvxofp8fp64mm => 5,
+
     _ => 2
   }
 
