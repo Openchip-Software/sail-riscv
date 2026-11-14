@@ -10,13 +10,15 @@ register group bytes and fflags. A failing test exits with the number of
 the failing case.
 
 Disclosed FP profile mirrored here: G=1, psm=0 (exact), rnd=frm. Per group,
-the W products are summed exactly; for vm=0 the group sum is rounded to the
-C format, then multiplied by the paired block scale in the C format, then
-added to C (another rounding). The paired block scale is itself the
-C-format product of scale_A and scale_B, each separately converted from
-E8M0 to the C format under frm. Each conversion, the scale product, the
-group-sum rounding, the scaling multiply, and the final add is a separate
-rounding point with its own flags (S:1958-2027, S:5097-5124).
+the W products are summed exactly into an unrounded group sum S. For vm=0,
+the paired E8M0 block scales combine into a single internal exponent
+e = unsigned(scale_A) + unsigned(scale_B) - 254 (combine_scale_exponents,
+S:4854; read_block_scales, S:5098); reading and combining the scales
+raises no floating-point exception flags (S:2010-2036). e is applied to S
+as an exact exponent shift (fp_internal_scale; fp_scaled_gemm, S:5268;
+int_scaled_gemm, S:5358), then the scaled sum is rounded once to the C
+format and added to C (another rounding): two rounding points with their
+own flags (S:2100-2109).
 
 Usage:  ime_mx_gen.py [output_dir]      (default: this script's directory)
 """
@@ -205,10 +207,6 @@ def fp_add(fmt, a, b, rm, fl):
     return rnd(fmt, add(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), rm, fl), rm, fl)
 
 
-def fp_mul(fmt, a, b, rm, fl):
-    return rnd(fmt, mul(dec_flags(fmt, a, fl), dec_flags(fmt, b, fl), fl), rm, fl)
-
-
 def is_nan(fmt, v):
     return decode(fmt, v)[0][0] == "nan"
 
@@ -301,21 +299,29 @@ def get_elem(buf, eew, idx):
 # ---------------------------------------------------------------------------
 
 
-def block_scale(fc, rm, g, v0, i, j, s, fl):
-    """read_block_scales: convert scale_A and scale_B to fmt_C under rm
-    (each a separate rounding point), then multiply them in fmt_C (one more
-    rounding). Returns (blk_scale_bits, is_nan). NaN either when either
-    encoded E8M0 value is 0xFF (no flags), or when the conversions and
-    multiplication produce NaN, e.g. +0 times +inf."""
+def block_scale(g, v0, i, j, s):
+    """combine_scale_exponents / read_block_scales (S:4854, S:5098): add the
+    unbiased exponents of the paired E8M0 scales for block s of row i,
+    column j. Returns (exponent, is_nan); when is_nan is True (either
+    encoded scale is the E8M0 NaN field 0xFF) the exponent is unused.
+    Reading and combining the scales raises no floating-point exception
+    flags (S:2010-2036)."""
     R = g.lam * g.sew // 16
     ea = get_elem(v0, 16, i * R + s) & 0xFF
     eb = get_elem(v0, 16, j * R + s) >> 8
     if E8M0_NAN in (ea, eb):
-        return canonical_nan(fc), True
-    sa = rnd(fc, ("fin", 0, Fraction(2) ** (ea - E8M0_BIAS)), rm, fl)
-    sb = rnd(fc, ("fin", 0, Fraction(2) ** (eb - E8M0_BIAS)), rm, fl)
-    blk = fp_mul(fc, sa, sb, rm, fl)
-    return blk, is_nan(fc, blk)
+        return 0, True
+    return ea + eb - 2 * E8M0_BIAS, False
+
+
+def scale_exact(x, e):
+    """fp_internal_scale: apply a combined E8M0 exponent to an internal
+    value as an exact exponent shift, with no rounding and no flags.
+    Signed zeros, infinities, and NaNs pass through unchanged (S:2010-2036,
+    S:2100-2109)."""
+    if x[0] in ("nan", "inf"):
+        return x
+    return ("fin", x[1], x[2] * Fraction(2) ** e)
 
 
 def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
@@ -328,9 +334,9 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
             acc = get_elem(C, g.sew, ci)
             nan_out = False
             for s in range(nblk):
-                blk = None
+                scale_exp = 0
                 if scaled:
-                    blk, nan_out = block_scale(fc, rm, g, v0, i, j, s, fl)
+                    scale_exp, nan_out = block_scale(g, v0, i, j, s)
                     if nan_out:
                         break
                 blo, bhi = s * bsz, min(s * bsz + bsz, g.K) - 1
@@ -342,7 +348,7 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
                     for g0 in range((lo - slo) // g.W, (hi - slo) // g.W + 1):
                         # The sum starts from the first product, not a
                         # literal +0: a W=1 group is the exact product
-                        # (S:1532-1533), and adding it to +0 would turn a
+                        # (S:1531-1532), and adding it to +0 would turn a
                         # -0 product into +0 under round-to-nearest-even.
                         ks = range(slo + g0 * g.W, slo + g0 * g.W + g.W)
                         S = None
@@ -351,11 +357,13 @@ def ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, C, v0, fl):
                             b = dec_flags(fb, get_elem(B, g.eew_a, g.b_idx(k, j)), fl)
                             prod = mul(a, b, fl)
                             S = prod if S is None else add(S, prod, rm, fl)
-                        # S is rounded to fmt_C before scaling: a separate
-                        # rounding point from the final accumulation
-                        # (S:2098-2102).
-                        s_bits = rnd(fc, S, rm, fl)
-                        term = fp_mul(fc, blk, s_bits, rm, fl) if scaled else s_bits
+                        # fp_internal_scale applies the combined E8M0
+                        # exponent to the unrounded exact group sum S
+                        # (S:2010-2036); round_group_sum then rounds the
+                        # scaled sum to fmt_C once (S:2100-2109), and
+                        # accumulating it into C is a separate rounding.
+                        scaled_S = scale_exact(S, scale_exp) if scaled else S
+                        term = rnd(fc, scaled_S, rm, fl)
                         acc = fp_add(fc, acc, term, rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
@@ -393,7 +401,7 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
             acc = get_elem(C, g.sew, ci)
             nan_out = False
             for s in range(nblk):
-                blk, nan_out = block_scale(fc, rm, g, v0, i, j, s, fl)
+                scale_exp, nan_out = block_scale(g, v0, i, j, s)
                 if nan_out:
                     break
                 dot = 0
@@ -401,11 +409,14 @@ def ref_int_gemm(g, fc, bs16, rm, A, B, C, v0, fl):
                     a = sext(get_elem(A, g.eew_a, g.a_idx(i, k)), g.eew_a)
                     b = sext(get_elem(B, g.eew_a, g.b_idx(k, j)), g.eew_a)
                     dot += a * b
-                # int_to_fp(dot, fmt_C, rm): round the exact integer sum to
-                # the C format before multiplying by the block scale.
+                # fp_internal_from_int represents the exact integer dot
+                # product internally; fp_internal_scale then applies the
+                # combined E8M0 exponent to it exactly (S:1283-1295,
+                # S:2010-2036). The scaled sum is rounded to fmt_C once and
+                # accumulated into C (another rounding).
                 xs = ("fin", 1 if dot < 0 else 0, Fraction(abs(dot)))
-                fp_sum = rnd(fc, xs, rm, fl)
-                acc = fp_add(fc, acc, fp_mul(fc, blk, fp_sum, rm, fl), rm, fl)
+                fp_sum = rnd(fc, scale_exact(xs, scale_exp), rm, fl)
+                acc = fp_add(fc, acc, fp_sum, rm, fl)
             put_elem(C, g.sew, ci, canonical_nan(fc) if nan_out else acc)
 
 
@@ -874,6 +885,17 @@ def special_cases(rng):
             put_elem(A, g.eew_a, g.a_idx(0, k), E5M2_MAX)
 
     def scale_ovf(g, A, B, C, v0):
+        """E8M0 0xFE (2^127) as scale_A for every element of row 1, block 0,
+        combined with each column's near-2^0 scale_B: a combined exponent
+        far outside FP16's range. combine_scale_exponents raises no flags
+        (S:2010-2036); the exponent is applied exactly to each group sum,
+        which then overflows FP16 directly at its single rounding, OF|NX.
+        Round-up sends every overflowing positive-magnitude group to +inf
+        but every overflowing negative-magnitude group to FP16's largest
+        finite negative value instead of -inf, so (unlike bf16-ovf's
+        round-to-nearest-even, which can collide opposite-signed groups
+        into the default NaN) this rounding mode cannot produce a NaN
+        here."""
         set_scale(g, v0, 1, 0, scale_a=0xFE)
 
     def inf_times_zero(g, A, B, C, v0):
@@ -881,34 +903,60 @@ def special_cases(rng):
         put_elem(B, g.eew_a, g.b_idx(0, 0), 0x00)
 
     def tiny_scale(g, A, B, C, v0):
+        """Every E8M0 scale field is 0x00: every combined exponent is -254.
+        combine_scale_exponents raises no flags reading or combining them
+        (S:2010-2036); the exponent is applied exactly to each (generally
+        nonzero) group sum, which is then far below FP32's minimum
+        subnormal 2^-149 at its single rounding to fmt_C, underflowing to
+        +0 under round-to-nearest-even, UF|NX."""
         for p in range(VLEN // 16):
             put_elem(v0, 16, p, 0x0000)
 
     def bf16_ovf(g, A, B, C, v0):
+        """E8M0 0xFE (2^127) for both scale_A of row 0 and scale_B of
+        column 1, block 0: the combined exponent at C[0][1] is 254, far
+        outside BF16's range. The exponent is applied exactly to each group sum
+        before its single rounding to BF16; round-to-nearest-even
+        overflows every group, of either sign, to a signed infinity (not a
+        separate scale conversion), and opposite-signed groups of the same
+        output element collide into the default NaN, NV, in addition to
+        the OF|NX of each overflowing rounding."""
         set_scale(g, v0, 0, 0, scale_a=0xFE)
         set_scale(g, v0, 1, 0, scale_b=0xFE)
 
-    def zero_times_inf_scale(g, A, B, C, v0):
-        """scale_A of row 0 (field 0x00, 2^-127) converts to +0 in FP16;
-        scale_B of column 2 (field 0xFE, 2^127) converts to +inf. Both
-        encoded scales are finite, but the fmt_C paired-scale multiply at
-        C[0][2] sees +0 times +inf: default NaN, NV (S:2008-2027)."""
+    def scale_pair_exact_unity(g, A, B, C, v0):
+        """scale_A of row 0 is the E8M0 field 0x00 (2^-127); scale_B of
+        column 2 is the E8M0 field 0xFE (2^127). Their combined exponent at
+        C[0][2] is (-127)+127 = 0: an exact unity scale, applied with no
+        flags (S:2010-2036), even though each individual encoded scale is
+        as extreme as possible. Under the superseded rule, converting each
+        scale to fmt_C separately gave +0 and +inf, and the fmt_C paired
+        multiply of +0 times +inf produced the default NaN, NV; the new
+        rule never converts either scale or forms that product, so C[0][2]
+        is instead the group sum rounded to FP16 exactly as if unscaled.
+        (Column 2's scale_B of 2^127 also combines with other rows'
+        near-2^0 scale_A there, overflowing those elements under
+        round-to-nearest-even the same way bf16-ovf does.)"""
         set_scale(g, v0, 0, 0, scale_a=0x00)
         set_scale(g, v0, 2, 0, scale_b=0xFE)
 
     def scale_rtz_max_finite(g, A, B, C, v0):
         """E8M0 0xFE (2^127) converts to FP16's maximum finite value 65504
-        under round-towards-zero, not +inf (contrast scale_ovf and
-        zero_times_inf_scale, both round-to-nearest-even or round-up).
-        Row 0's scale_A is 0xFE; every scale_B is the E8M0 field for
-        2^0 = 1.0, so the combined block scale at every row-0 element is
-        exactly 65504, not infinite. A[0][0] and B[0][0] are 1.0 (E5M2),
-        every other A/B element is 0, so the scaled term at C[0][0] is
-        exactly 65504 added to an initial C of 0: the result distinguishes
-        the maximum finite value from +inf, which an infinite scale would
-        give instead. Every other output element's scaled term is exactly
-        0 (zero times the finite 65504, not zero times infinity), so those
-        elements keep their initial random C value unchanged."""
+        under round-towards-zero, not +inf (contrast scale_ovf, which uses
+        round-up). Row 0's scale_A is 0xFE; every scale_B is the E8M0
+        field for 2^0 = 1.0, so the combined exponent at every row-0
+        element is exactly 127. A[0][0] and B[0][0] are 1.0 (E5M2), every
+        other A/B element is 0, so the exact group sum at C[0][0] is
+        1.0 * 2^127 = 2^127; rounding that directly to FP16 under
+        round-towards-zero does not round to infinity on overflow, giving
+        the maximum finite value 65504 instead (OF|NX), added to an
+        initial C of 0: the result distinguishes the maximum finite value
+        from +inf, which round-to-nearest-even or round-up would give
+        instead. Every other output element's exact group sum is zero
+        (zero times 2^127 is still exactly zero, not zero times infinity,
+        since the exponent is never materialized as its own floating-point
+        value), so those elements keep their initial random C value
+        unchanged."""
         for i in range(g.M):
             for k in range(g.K):
                 put_elem(A, g.eew_a, g.a_idx(i, k), 0)
@@ -924,12 +972,12 @@ def special_cases(rng):
         set_scale(g, v0, 0, 0, scale_a=0xFE)
 
     def int_overflow(g, A, B, C, v0):
-        """dot(0,0) = 5 * 127 * 127 = 80645 > 65504 (FP16 max): int_to_fp
-        rounds the exact dot to FP16 before scaling and overflows to +inf,
-        OF|NX. Every scale pair is the E8M0 field for 2^0 = 1.0 (exact, no
-        flags), and every other A/B element is 0, so the scaled term for
-        every other output element is exactly +0 and the test is otherwise
-        flag-free."""
+        """dot(0,0) = 5 * 127 * 127 = 80645 > 65504 (FP16 max). Every scale
+        pair is the E8M0 field for 2^0 = 1.0, a combined exponent of 0
+        (exact, no flags); the exact integer dot product is rounded
+        directly to FP16 and overflows, OF|NX. Every other A/B element is
+        0, so the scaled term for every other output element is exactly
+        +0 and the test is otherwise flag-free."""
         for i in range(g.M):
             for k in range(g.K):
                 put_elem(A, g.eew_a, g.a_idx(i, k), 0)
@@ -943,10 +991,51 @@ def special_cases(rng):
         for p in range(VLEN // 16):
             put_elem(v0, 16, p, E8M0_BIAS | (E8M0_BIAS << 8))
 
+    def tiny_scale_min_subnormal(g, A, B, C, v0):
+        """The same E8M0 0x00 scale fields as tiny_scale (every combined
+        exponent -254), but with C[0][0] forced to +0 first. tiny_scale's
+        random initial C absorbs the rounded-up minimum subnormal without
+        changing a single bit (any ordinary-magnitude C already has an ULP
+        far larger than 2^-149, so adding one ULP of it back rounds to the
+        same C exactly); the fflags are UF|NX either way, from the tiny
+        rounding itself, not from the add. Forcing C[0][0] = +0 makes the
+        round-up outcome observable there: round-to-nearest-even at
+        tiny_scale's single rounding sends C[0][0]'s group sum to +0, but
+        round-up here sends it to a nonzero multiple of the minimum
+        positive FP32 subnormal instead."""
+        tiny_scale(g, A, B, C, v0)
+        put_elem(C, g.sew, g.c_idx(0, 0), 0)
+
+    def spec_example_2pow_20(g, A, B, C, v0):
+        """The exact-scaling example given by the specification text at
+        S:2025-2029: scales 2^-15 and 2^-15 (E8M0 field 0x70 each) have the
+        combined exponent -30. A[0][0] and B[0][0] are 32.0 (E5M2); every
+        other A/B element is 0, so the exact group sum at C[0][0] is
+        32 * 32 = 2^10. Applying the combined exponent -30 to that exact
+        sum gives 2^-20, which is exactly representable as an FP16
+        subnormal (FP16's minimum subnormal is 2^-24), so C[0][0] = 2^-20
+        added to an initial C of 0 raises no flags at all. Rounding the
+        scale product 2^-30 to FP16 first, as the superseded rule did,
+        would instead give +0 (2^-30 is far below FP16's minimum
+        subnormal) and discard this contribution entirely."""
+        for i in range(g.M):
+            for k in range(g.K):
+                put_elem(A, g.eew_a, g.a_idx(i, k), 0)
+        for j in range(g.M):
+            for k in range(g.K):
+                put_elem(B, g.eew_a, g.b_idx(k, j), 0)
+        thirty_two = pack("e5m2", 0, bias("e5m2") + 5, 0)
+        put_elem(A, g.eew_a, g.a_idx(0, 0), thirty_two)
+        put_elem(B, g.eew_a, g.b_idx(0, 0), thirty_two)
+        put_elem(C, g.sew, g.c_idx(0, 0), 0)
+        for p in range(VLEN // 16):
+            put_elem(v0, 16, p, E8M0_BIAS | (E8M0_BIAS << 8))
+        set_scale(g, v0, 0, 0, scale_a=0x70, scale_b=0x70)
+
     def neg_zero_sum(g, A, B, C, v0):
         """C[0][0] = -0 and every A[0][k]*B[k][0] product (k=0..K-1) is
         exactly -0 (A=+0, B=-1.0 fp16). A W=1 group is a single product,
-        not a sum starting from a literal +0 (S:1532-1533), so C[0][0]
+        not a sum starting from a literal +0 (S:1531-1532), so C[0][0]
         stays -0 under round-to-nearest-even instead of becoming +0."""
         neg_one = pack("fp16", 1, bias("fp16"), 0)
         neg_zero = pack("fp16", 1, 0, 0)
@@ -974,7 +1063,7 @@ def special_cases(rng):
             (0, 1, 0),
             "bs32",
             RUP,
-            mutate=tiny_scale,
+            mutate=tiny_scale_min_subnormal,
             note="tiny-scale-min-subnormal",
         ),
         build_case(
@@ -984,8 +1073,8 @@ def special_cases(rng):
             e5,
             "bs32",
             RNE,
-            mutate=zero_times_inf_scale,
-            note="zero-times-inf-scale",
+            mutate=scale_pair_exact_unity,
+            note="scale-pair-exact-unity",
         ),
         build_case(
             rng,
@@ -1031,7 +1120,7 @@ def special_cases(rng):
             "bs32",
             RNE,
             mutate=double_round_fp,
-            note="round-before-scale",
+            note="exact-scale",
         ),
         build_case(
             rng,
@@ -1042,7 +1131,17 @@ def special_cases(rng):
             RNE,
             int_inputs=True,
             mutate=double_round_int,
-            note="round-before-scale",
+            note="exact-scale",
+        ),
+        build_case(
+            rng,
+            2,
+            16,
+            e5,
+            "bs32",
+            RNE,
+            mutate=spec_example_2pow_20,
+            note="spec-example-2pow-20",
         ),
         build_case(
             rng,
@@ -1064,13 +1163,16 @@ def zero_row0(g, A, C):
 
 
 def double_round_fp(g, A, B, C, v0):
-    """S = 1.25 + 2^-32 (E5M2 1.25*1.0 + 2^-16*2^-16), scale 2^-148, FP32 C.
-    S is rounded to FP32 before scaling (round-to-nearest-even): the
-    2^-32 term is far below FP32's ULP at 1.25, so S rounds down to exactly
-    1.25. Scaling the rounded 1.25 by 2^-148 gives 2.5 units of the minimum
-    subnormal 2^-149, an exact tie that rounds to the even value 2. Scaling
-    the unrounded exact sum first (2*S units of 2^-149 = 2.5 + tiny) would
-    instead round unambiguously up to 3."""
+    """S = 1.25 + 2^-32 exactly (E5M2 1.25*1.0 + 2^-16*2^-16 products);
+    combined exponent -148 (scale 2^-148), FP32 C. fp_internal_scale
+    applies the exponent to the exact, unrounded S (S:2010-2036): 2*S
+    units of the minimum FP32 subnormal 2^-149 is 2.5 plus a tiny
+    remainder, which rounds unambiguously up to 3 at the single rounding
+    this rule specifies (S:2100-2109). Rounding S to FP32 before scaling,
+    as the superseded rule did, would instead have discarded the 2^-32
+    term -- far below FP32's ULP at 1.25 -- rounding S down to exactly
+    1.25 first; scaling that already-rounded 1.25 gives an exact tie of
+    2.5 units, which rounds to the even value 2 instead of 3."""
     zero_row0(g, A, C)
     for k, a, b in ((0, 0x3D, 0x3C), (1, 0x01, 0x01)):
         put_elem(A, g.eew_a, g.a_idx(0, k), a)
@@ -1080,15 +1182,16 @@ def double_round_fp(g, A, B, C, v0):
 
 
 def double_round_int(g, A, B, C, v0):
-    """dot = 64*32 + 1*1 = 2049, scale 2^-36, FP16 C (subnormal unit 2^-24).
-    int_to_fp rounds the exact dot to FP16 before scaling
-    (round-to-nearest-even): 2049 is a tie between 2048 and 2050 at FP16's
-    ULP there, and rounds down to the even value 2048. The scales 2^-18
-    each convert to FP16 exactly (subnormal, no rounding error), but their
-    product 2^-36 is far below FP16's minimum subnormal 2^-24 and rounds to
-    +0, so the final scaled term is +0. Scaling the unrounded exact dot
-    first (2049 * 2^-36 = 0.5002 units of 2^-24) would instead round
-    unambiguously up to 1."""
+    """dot = 64*32 + 1*1 = 2049 exactly; combined exponent -36 (scale
+    2^-36), FP16 C (minimum subnormal 2^-24). fp_internal_scale applies the
+    exponent to the exact integer dot product (S:1283-1295, S:2010-2036):
+    2049 * 2^-36 is 0.5002 units of 2^-24, which rounds unambiguously up to
+    1 at the single rounding this rule specifies. Rounding the dot product
+    to FP16 before scaling, as the superseded rule did, would instead have
+    hit a tie at FP16's ULP there (2049 is equidistant between 2048 and
+    2050), rounding down to the even value 2048 first; scaling that
+    already-rounded value gives an exact tie of 0.5 units, which rounds to
+    the even value 0 instead of 1."""
     zero_row0(g, A, C)
     for k, a, b in ((0, 64, 32), (1, 1, 1)):
         put_elem(A, g.eew_a, g.a_idx(0, k), a)
@@ -1314,7 +1417,7 @@ def fp_row_cases(rng):
     # the table marks legal: same-format inputs (FP16xFP16, BF16xBF16) are
     # legal only into the matching C format, and a mixed FP16/BF16 input pair
     # is legal into either C format. SEW=32/64 W=1 and SEW=64 W=2 ignore
-    # altfmt_A/altfmt_B for their FP32/FP64 inputs (S:1127, S:1490-1494), so
+    # altfmt_A/altfmt_B for their FP32/FP64 inputs (S:1127, S:1489-1493), so
     # altfmt_A=1 is included to show it still executes.
     rows = [
         (1, 16, [(0, 0, 0), (1, 1, 1), (0, 1, 0), (0, 1, 1), (1, 0, 0), (1, 0, 1)]),
@@ -1433,41 +1536,55 @@ def main():
     }
     files["test_ime_mx_special.S"] = (
         (
-            "MX special values and block edge cases (see each case title). Each\n"
-            "scale is converted to fmt_C under frm and the two converted scales are\n"
-            "multiplied in fmt_C before the group sum is scaled (S:1958-2027):\n"
+            "MX special values and block edge cases (see each case title). Reading\n"
+            "and combining the paired E8M0 scales into one internal exponent raises\n"
+            "no flags; that exponent is applied exactly to the unrounded group sum\n"
+            "(or, for the integer path, the exact dot product) before a single\n"
+            "rounding to fmt_C (S:2010-2036, S:2100-2109):\n"
             "  nan-scale: E8M0 0xFF for A row 0, block 1 -> row 0 is the canonical NaN;\n"
             "    block 2 of row 0 would overflow FP16 (OF) but must not be evaluated.\n"
-            "  scale-ovf: E8M0 0xFE (2^127) converts to +inf in FP16 for A row 1. Every\n"
-            "    group of that row's first block is then scaled to a signed infinity;\n"
-            "    groups of opposite sign collide into the default NaN (NV) in addition\n"
-            "    to the OF|NX of the scale conversion itself.\n"
+            "  scale-ovf: E8M0 0xFE (2^127) as scale_A for A row 1 gives a combined\n"
+            "    exponent far outside FP16's range; every group of that row's first\n"
+            "    block overflows FP16 at its own single rounding, OF|NX. Round-up sends\n"
+            "    positive-magnitude overflow to +inf but negative-magnitude overflow to\n"
+            "    FP16's largest finite negative value instead of -inf, so this rounding\n"
+            "    mode cannot collide opposite-signed groups into the default NaN here.\n"
             "  inf*0: E5M2 inf times 0 raises NV and gives NaN (vm=1 and vm=0). This is\n"
             "    an A/B input product, not a block scale.\n"
-            "  tiny-scale: E8M0 0x00 pairs convert to +0 in FP32 under round-to-\n"
-            "    nearest-even (2^-127 is far below the minimum subnormal); the scaled\n"
-            "    term is exactly +0, UF|NX from the scale conversions.\n"
-            "  tiny-scale-min-subnormal: the same E8M0 0x00 pairs under round-up\n"
-            "    convert to the minimum positive FP32 subnormal instead of +0.\n"
-            "  zero-times-inf-scale: scale_A of row 0 converts to +0 (E8M0 0x00) and\n"
-            "    scale_B of column 2 converts to +inf (E8M0 0xFE); their fmt_C product\n"
-            "    at C[0][2] is the default NaN, NV (S:2008-2027), even though both\n"
-            "    encoded E8M0 scales are finite.\n"
-            "  scale-rtz-max-finite: the same E8M0 0xFE (2^127) as zero-times-inf-scale\n"
-            "    and scale-ovf, but under round-towards-zero it converts to FP16's\n"
+            "  tiny-scale: E8M0 0x00 pairs give a combined exponent of -254; applying\n"
+            "    it to a group sum and rounding to FP32 under round-to-nearest-even\n"
+            "    underflows to +0, UF|NX.\n"
+            "  tiny-scale-min-subnormal: the same -254 exponent, but C[0][0] is forced\n"
+            "    to +0 first so round-up's outcome is observable there: it rounds to a\n"
+            "    nonzero multiple of FP32's minimum subnormal instead of +0.\n"
+            "  scale-pair-exact-unity: scale_A of row 0 is E8M0 0x00 (2^-127) and\n"
+            "    scale_B of column 2 is E8M0 0xFE (2^127); their combined exponent at\n"
+            "    C[0][2] is exactly 0, applied with no flags even though each encoded\n"
+            "    scale is as extreme as possible (contrast the superseded rule, which\n"
+            "    converted +0 and +inf separately and multiplied them to the default\n"
+            "    NaN, NV). The same scale_B also overflows other rows at column 2 under\n"
+            "    round-to-nearest-even, colliding to NaN the same way bf16-ovf does.\n"
+            "  scale-rtz-max-finite: the same E8M0 0xFE (2^127) as scale-ovf, but under\n"
+            "    round-towards-zero the exact group sum 2^127 rounds directly to FP16's\n"
             "    maximum finite value 65504, OF|NX, instead of +inf; paired with a 1.0\n"
             "    scale_B and a single 1.0 x 1.0 product, C[0][0] = 65504 exactly,\n"
             "    distinguishing the maximum finite value from +inf.\n"
-            "  int-overflow: an exact MXINT8 dot product of 80645 overflows FP16 (OF)\n"
-            "    in int_to_fp, before it is multiplied by the (here unit) block scale.\n"
-            "  bf16-ovf: 0xFE x 0xFE converts to +inf in BF16 at the fmt_C scale\n"
-            "    multiply (not from the group sum), similarly colliding to NaN+NV\n"
-            "    across opposite-signed groups for its target element.\n"
+            "  int-overflow: an exact MXINT8 dot product of 80645, combined exponent 0\n"
+            "    (exact unity scale), overflows FP16 (OF) at its single rounding.\n"
+            "  bf16-ovf: E8M0 0xFE as both scale_A and scale_B gives a combined\n"
+            "    exponent of 254; every group, of either sign, overflows directly to a\n"
+            "    signed infinity under round-to-nearest-even, and opposite-signed\n"
+            "    groups collide to the default NaN, NV.\n"
             "  partial: K_eff=16 is a single partial BS=32 block.\n"
-            "  round-before-scale: the group sum (or, for the integer path, the exact\n"
-            "    dot product) is rounded to fmt_C before the scaling multiply, not\n"
-            "    the unrounded exact value; the two round separately and can round to\n"
-            "    different ties (FP32 and FP16)."
+            "  exact-scale: the combined exponent is applied to the exact, unrounded\n"
+            "    group sum (or exact dot product) before its single rounding to fmt_C;\n"
+            "    rounding to fmt_C first, as the superseded rule did, would instead tie\n"
+            "    the other way (FP32 and FP16).\n"
+            "  spec-example-2pow-20: the specification's own exact-scaling example\n"
+            "    (S:2025-2029): scales 2^-15 and 2^-15 combine to exponent -30; applied\n"
+            "    to an exact group sum of 2^10, the result is 2^-20, exactly\n"
+            "    representable in FP16 and flag-free, whereas rounding the scale\n"
+            "    product 2^-30 to FP16 first would discard it as +0."
         ),
         special_cases(rng),
     )
