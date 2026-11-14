@@ -2,7 +2,7 @@
 
 This is the status note for the Sail implementation of the draft RISC-V Integrated Matrix Extension. It documents what is implemented in this tree, how it is tested, and its known limitations.
 
-Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/unpriv/integrated-matrix.adoc`.
+Spec version: `riscv/integrated-matrix-extension` commit `58810918`, file `src/unpriv/integrated-matrix.adoc`.
 
 ## Implemented pieces
 
@@ -31,12 +31,12 @@ Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/u
 - Order-preserving tile load/store:
   - `vmtl.v` and `vmts.v` decode for `Zvvmtls`.
   - Implemented for the standard vector element widths handled by the vector model (`SEW=8,16,32,64`).
-  - The instruction-immediate lambda field, when nonzero, overrides `vtype.lambda`; `000` selects `vtype.lambda`. Either way the resulting lambda value must be permissible for the current `(VLEN, SEW)` (AMB-11); it is not WARL-clamped the way `vtype.lambda` itself is (S:2700-2713).
+  - The instruction-immediate lambda field, when nonzero, overrides `vtype.lambda`; `000` selects `vtype.lambda`. Either way the resulting lambda value must be permissible for the current `(VLEN, SEW)` (AMB-11); it is not WARL-clamped the way `vtype.lambda` itself is (S:2708-2720).
   - `VL` shall be a multiple of `lambda * LMUL`, or the instruction raises illegal instruction (AMB-12); `VL=0` remains a legal no-op, since `0 % (lambda * LMUL) == 0`.
   - Register layout (both tile modes): tile element `i` lives at register-group element `ime_tile_reg_idx(i, LMUL, lambda, VLEN/SEW)`, the layout the matrix multiplies read. The mask bit is indexed by tile element `i`. Only active elements are written; prestart, inactive and tail elements stay undisturbed. Example `LMUL=2`, `lambda=2`, `VLEN/SEW=8`: tile elements `0..7` land at `[0,1,8,9,2,3,10,11]`.
   - Uses the order-preserving memory address formula in `ime_tile_ordered_mem_off`: `linesize = lambda * LMUL`, `mem_off = (i / linesize) * LD + (i % linesize)`.
   - A zero value in `rs2` (`x0` or any register holding 0) selects the natural leading dimension `LD = lambda * LMUL`.
-  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`). A masked store with `vs3=v0` is legal (AMB-13): the IME spec restricts only masked loads (S:2711-2713), and the store path has no `valid_rd_mask` check.
+  - A masked load (`vm=0`) with `vd=v0` raises illegal instruction (also for `vmttl.v`). A masked store with `vs3=v0` is legal (AMB-13): the IME spec restricts only masked loads (S:2719-2720), and the store path has no `valid_rd_mask` check.
 - Transposing tile load/store:
   - `vmttl.v` and `vmtts.v` decode for `Zvvmttls`. Decode is mode-gated: order-preserving mode (`mode=00`) requires `Zvvmtls`; transposing mode (`mode=01`) requires `Zvvmttls`. Neither mode requires both extensions.
   - Implemented for `SEW=8,16,32,64`, sharing the same lambda, mask, tail, prestart, `vstart`, `VL` divisibility, and memory-exception behavior as `vmtl.v`/`vmts.v`.
@@ -49,7 +49,12 @@ Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/u
   - Takes the geometry that `ime_gemm_geometry(W)` decodes for the instruction's widening factor `W`: `K_eff = lambda * W * LMUL`, `storage_K = lambda * LMUL`, `M = VLEN / (SEW * lambda)`, `N = VL / storage_K`, `N_max = M`, `EMUL_C = VLEN / (SEW * lambda^2)`.
   - The physical storage geometry is the same for all `W`: each matrix row holds `storage_K = lambda * LMUL` `SEW`-bit storage elements along K, addressed via `mat_A_idx`/`mat_B_idx`/`mat_C_idx` (built on `tile_reg_idx`).
   - For `W>1` each `SEW`-bit storage element packs `W` logical input elements of width `EEW = SEW / W`. Logical index `k` maps to storage column `k / W` and lane `k % W` (`ime_packed_storage_col`/`ime_packed_lane`); `ime_packed_subelement_value` extracts the lane in little-endian lane order and sign- or zero-extends it per `altfmt_A/B`. Element `k` occupies bits `[k*EEW + EEW-1 : k*EEW]`, including the sub-byte Int4 (`EEW=4`) nibble packing (even element = lower nibble, odd element = upper nibble).
-  - Legality checks: `W in {1,2,4,8}`, `SEW % W == 0`, `EEW = SEW/W` a supported integer logical width (`{4,8,16,32,64}`), `VL` a multiple of `storage_K = lambda * LMUL` (not the widened `K_eff = lambda * W * LMUL`: `VL` is counted in storage-width elements, matching `decode_gemm_geometry`'s `vl_div = lambda * LMUL`, S:4884-4911), and the existing `M`/`N`/`N_max`/`EMUL_C`/register-group checks.
+  - `W` is 1, 2, 4 or 8, fixed by the instruction. `execute_ime_int_mmacc` applies these checks to a `vm=1` encoding, in this order:
+    - `ime_int_row_ok(W, SEW)`: the individual extension that `tbl-int-encoding-map` names for the `(W, SEW)` cell is enabled. The `SEW=64` cells also require `Zve64x`. A `(W, SEW)` cell with no row in the table, such as `vqmmacc.vv` at `SEW=8`, fails this check.
+    - `valid_vtype()`.
+    - `vstart` is zero (`VSTART_MANDATORY`).
+    - `ime_gemm_geometry(W)`, the geometry helper that the floating-point and MX paths also call. It requires `LMUL >= 1` and a nonzero `vtype.lambda` that `ime_lambda_supported_for_vsew` accepts for the current `SEW`. It requires `SEW % W == 0` and an `EEW = SEW/W` in `{4,8,16,32,64}` (`ime_int_eew_supported`). It requires `M % lambda == 0` and `EMUL_C = M / lambda` in `{1,2,4,8,16}` (`ime_group_size_legal`). It requires `VL` to be a multiple of `storage_K = lambda * LMUL`, not of the widened `K_eff = lambda * W * LMUL`, because `VL` counts storage-width elements. This matches `vl_div = lambda * LMUL` in `decode_gemm_geometry` (S:4880-4907). It also requires `N <= N_max`.
+    - `ime_gemm_groups_ok`, which the floating-point and MX paths also call. It requires `vs1` and `vs2` to be aligned to `LMUL` and `vd` to be aligned to `EMUL_C`. It also requires `vd` to overlap neither `vs1` nor `vs2`.
   - `EMUL_C` may be 1, 2, 4, 8 or 16 (`ime_group_size_legal`). `EMUL_C=16` occurs, for example, at `VLEN=256`, `SEW=16`, `lambda=1`; `vd` is then `v0` or `v16`. `read_single_element`/`write_single_element` accept at most 8 registers (max LMUL), so C is accessed through `read_single_element_in_group`/`write_single_element_in_group` with a limit of `IME_EMUL_C_MAX` (16, defined in `ime_types.sail`). The FP rows use the same accessors.
   - `VL=0` is a legal no-op (`N=0`).
   - `vd` shall not overlap `vs1` or `vs2` (`ime_reg_groups_disjoint`), regardless of `VL`, including `VL=0` (S:551-559). `vs1` and `vs2` may overlap each other (S:556-559).
@@ -63,7 +68,7 @@ Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/u
   - `vm=0` of `vwmmacc.vv`, `vqmmacc.vv` and `v8wmmacc.vv` encodes the integer-input MX forms `vfwimmacc.vv`, `vfqimmacc.vv` and `vf8wimmacc.vv`. `execute_ime_int_mmacc` passes them to `execute_ime_int_mx` (see "Microscaling (MX) matrix multiply-accumulate").
   - `vm=0` of `vmmacc.vv` is reserved, because no MX form exists for `W=1`. It raises illegal instruction. The assembly mapping prints it with the `, v0.scale` suffix of the `vm=0` MX forms.
 - Unscaled floating-point matrix multiply-accumulate (`execute_ime_fp_engine`, `vm=1`), shared by `vfmmacc.vv` (W=1, funct6 `0x14`), `vfwmmacc.vv` (W=2, funct6 `0x15`), `vfqmmacc.vv` (W=4, funct6 `0x16`), and `vf8wmmacc.vv` (W=8, funct6 `0x17`):
-  - `vfmmacc.vv` (`SEW=16`): FP16xFP16->FP16 and BF16xBF16->BF16 are legal; FP16xFP16->BF16 and BF16xBF16->FP16 are reserved (the C format shall match the input format when both inputs match). A mixed FP16/BF16 input pair is legal into either C format and needs both `Zvvfp16mm` and `Zvvbf16mm` enabled. `SEW=32`/`SEW=64`: FP32/FP64 inputs ignore `altfmt_A`/`altfmt_B` (S:1127, S:1490-1494).
+  - `vfmmacc.vv` (`SEW=16`): FP16xFP16->FP16 and BF16xBF16->BF16 are legal; FP16xFP16->BF16 and BF16xBF16->FP16 are reserved (the C format shall match the input format when both inputs match). A mixed FP16/BF16 input pair is legal into either C format and needs both `Zvvfp16mm` and `Zvvbf16mm` enabled. `SEW=32`/`SEW=64`: FP32/FP64 inputs ignore `altfmt_A`/`altfmt_B` (S:1127, S:1489-1493).
   - `vfwmmacc.vv`: OFP8->FP16/BF16 (`SEW=16`), FP16/BF16->FP32 with the C format fixed at FP32 (`SEW=32`), FP32->FP64 with `altfmt_A`/`altfmt_B` ignored (`SEW=64`).
   - `vfqmmacc.vv`: OFP4->FP16/BF16 (`SEW=16`), OFP8->FP32 (`SEW=32`), FP16/BF16->FP64 with the C format fixed at FP64 (`SEW=64`).
   - `vf8wmmacc.vv`: OFP4 E2M1->FP32 (`SEW=32`, `altfmt_A=altfmt_B=0`), OFP8 E4M3/E5M2->FP64 (`SEW=64`, per-operand `altfmt_A/B`, mixed allowed). `SEW<32` raises illegal instruction, as does `altfmt_A/B=1` at `SEW=32`.
@@ -77,7 +82,7 @@ Spec version: `riscv/integrated-matrix-extension` commit `e99d9065`, file `src/u
 ## Known gaps
 
 - The disclosed FP group profile is fixed at `G=1`, `psm=0` (exact partial sums), `rnd=frm`; no other disclosure profile is implemented.
-- C tile tail elements of the multiply-accumulate instructions are always left undisturbed; the model never reads `vta` in the GEMM paths. The specification permits this: `vta=0` requires it, and `vta=1` permits (but does not require) retaining the pre-instruction value instead of writing an all-ones `SEW`-bit pattern (S:2955-2977). The model never exercises the all-ones alternative `vta=1` also allows. This is unrelated to tile load/store, where the specification itself says the `vta`/`vma` fill policies do not apply and inactive/tail destination elements are always undisturbed (S:2675, S:2797) — the model already matches that mandatory behavior.
+- C tile tail elements of the multiply-accumulate instructions are always left undisturbed; the model never reads `vta` in the GEMM paths. The specification permits this: `vta=0` requires it, and `vta=1` permits (but does not require) retaining the pre-instruction value instead of writing an all-ones `SEW`-bit pattern (S:2962-2984). The model never exercises the all-ones alternative `vta=1` also allows. This is unrelated to tile load/store, where the specification itself says the `vta`/`vma` fill policies do not apply and inactive/tail destination elements are always undisturbed (S:2682, S:2804) — the model already matches that mandatory behavior.
 - The first-party test matrix targets RV64 with `VLEN=256` only; other `VLEN`/`XLEN` combinations are untested.
 - OFP8 accumulator rows are not implemented. These are `vfmmacc.vv` at `SEW=8` (`Zvvofp8mm`), `vfwmmacc.vv` at `SEW=8` with `vm=1` (`Zvvofp4ofp8mm`), and `vfwmmacc.vv` at `SEW=8` with `vm=0` (`Zvvxofp4ofp8mm`, `Zvvxnofp4ofp8mm`). The specification does not define OFP8 accumulator overflow, and E4M3 has no infinity encoding to overflow to (AMB-03). These rows decode but raise illegal instruction at execution.
 
