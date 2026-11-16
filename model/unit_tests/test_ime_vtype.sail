@@ -1,11 +1,11 @@
 // IME vtype helper regression tests.
 $[test]
 function test_ime_lambda_encoding_helpers() -> unit = {
-  assert(ime_lambda_field_to_value(0b000) == 0);
-  assert(ime_lambda_field_to_value(0b001) == 1);
-  assert(ime_lambda_field_to_value(0b010) == 2);
-  assert(ime_lambda_field_to_value(0b100) == 8);
-  assert(ime_lambda_field_to_value(0b111) == 64);
+  assert(ime_lambda_field_to_nat(0b000) == 0);
+  assert(ime_lambda_field_to_nat(0b001) == 1);
+  assert(ime_lambda_field_to_nat(0b010) == 2);
+  assert(ime_lambda_field_to_nat(0b100) == 8);
+  assert(ime_lambda_field_to_nat(0b111) == 64);
 
   assert(ime_lambda_value_to_field(1) == 0b001);
   assert(ime_lambda_value_to_field(8) == 0b100);

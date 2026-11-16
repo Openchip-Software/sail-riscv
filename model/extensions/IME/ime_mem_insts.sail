@@ -35,7 +35,6 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
   // vtype.lambda. Inst bit 28 (mew) is always 1 for tile load/store, which
   // keeps these encodings clear of the standard 64-bit vector loads/stores.
   let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
-  let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
   let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
@@ -48,7 +47,7 @@ function clause execute VMTLTYPE(lambda_field, mode, vm, rs2, rs1, vd) = {
      // The exact instruction-immediate lambda, or vtype.lambda when the
      // immediate is 000, must be permissible for this (VLEN, SEW); it is
      // not WARL-clamped (spec S:2708-2720).
-     not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
+     not(ime_lambda_supported_value_for_vsew(lambda_nat, vtype[vsew])) |
      linesize == 0
   then return Illegal_Instruction();
 
@@ -138,7 +137,6 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   // vtype.lambda. Inst bit 28 (mew) is always 1 for tile load/store, which
   // keeps these encodings clear of the standard 64-bit vector loads/stores.
   let lambda_enc = if lambda_field != 0b000 then lambda_field else vtype[vlambda];
-  let lambda_value = ime_lambda_field_to_value(lambda_enc);
 
   let LMUL = ime_lmul_value_nat(LMUL_pow);
   let lambda_nat = ime_lambda_field_to_nat(lambda_enc);
@@ -150,7 +148,7 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
      // The exact instruction-immediate lambda, or vtype.lambda when the
      // immediate is 000, must be permissible for this (VLEN, SEW); it is
      // not WARL-clamped (spec S:2708-2720).
-     not(ime_lambda_supported_value_for_vsew(lambda_value, vtype[vsew])) |
+     not(ime_lambda_supported_value_for_vsew(lambda_nat, vtype[vsew])) |
      linesize == 0
   then return Illegal_Instruction();
 
@@ -305,7 +303,6 @@ function execute_ime_int_gemm(
 function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let LMUL_pow = get_lmul_pow();
-  let lambda_value = ime_lambda_field_to_value(vtype[vlambda]);
   let lambda_nat = ime_lambda_field_to_nat(vtype[vlambda]);
   let LMUL = ime_lmul_value_nat(LMUL_pow);
   let signed_A = vtype[altfmt_A] == 0b0;
@@ -326,7 +323,7 @@ function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregi
      not(ime_int_row_ok(W, SEW)) |
      not(valid_vtype()) |
      illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
-     lambda_value == 0 |
+     lambda_nat == 0 |
      LMUL == 0 |
      not(valid_reg_group(vs1, LMUL_pow)) |
      not(valid_reg_group(vs2, LMUL_pow))

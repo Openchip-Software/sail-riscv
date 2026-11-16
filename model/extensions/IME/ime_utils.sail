@@ -107,7 +107,7 @@ function ime_vtype_fields_enabled() -> bool =
   ime_int_base_any_enabled() |
   ime_int_mx_any_enabled()
 
-function ime_lambda_field_to_value(field : bits(3)) -> int =
+function ime_lambda_field_to_nat(field : bits(3)) -> nat =
   match field {
     0b000 => 0,
     0b001 => 1,
@@ -148,7 +148,7 @@ function ime_lambda_supported_value_for_vsew(lambda_value : int, sew : bits(3)) 
 }
 
 function ime_lambda_supported_for_vsew(field : bits(3), sew : bits(3)) -> bool =
-  ime_lambda_supported_value_for_vsew(ime_lambda_field_to_value(field), sew)
+  ime_lambda_supported_value_for_vsew(ime_lambda_field_to_nat(field), sew)
 
 // Largest supported nonzero lambda for (VLEN, SEW), or 0b000 when (VLEN, SEW)
 // is outside the IME-legal configuration domain (no nonzero lambda is
@@ -203,7 +203,7 @@ function ime_select_vtype_lambda(requested : bits(3), current : bits(3), sew : b
     else ime_largest_supported_lambda_for_vsew(sew)
   } else if ime_lambda_supported_for_vsew(requested, sew) then requested
   else {
-    let leq = ime_largest_supported_lambda_leq(ime_lambda_field_to_value(requested), sew);
+    let leq = ime_largest_supported_lambda_leq(ime_lambda_field_to_nat(requested), sew);
     if leq != 0b000 then leq else ime_smallest_supported_lambda_for_vsew(sew)
   }
 
@@ -222,18 +222,6 @@ function ime_vtype_fields_legal(vt : Vtype) -> bool =
 // zimm[10:9] stay reserved. Example: 0b001 sets altfmt=1 (BF16 C at SEW=16).
 function ime_vtr_legal(vtr : bits(3)) -> bool =
   vtr[2 .. 1] == 0b00 & (vtr[0] == bitzero | ime_vtype_fields_enabled())
-
-function ime_lambda_field_to_nat(field : bits(3)) -> nat =
-  match field {
-    0b000 => 0,
-    0b001 => 1,
-    0b010 => 2,
-    0b011 => 4,
-    0b100 => 8,
-    0b101 => 16,
-    0b110 => 32,
-    0b111 => 64,
-  }
 
 function ime_lmul_value_nat(LMUL_pow : int) -> nat =
   if LMUL_pow == 0 then 1
