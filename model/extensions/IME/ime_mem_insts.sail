@@ -212,74 +212,51 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
 }
 
 // Shared unscaled integer GEMM executor for the vmmacc.vv family. This mirrors
-// the specification's int_gemm helper: decode geometry from vtype/vl plus the
-// per-instruction widening factor W, loop over active C columns j, rows i, and
-// the effective K dimension, and use mat_A/mat_B/mat_C indexing.
+// the specification's int_gemm helper: loop over active C columns j, rows i,
+// and the effective K dimension of the geometry `g`, and use mat_A/mat_B/mat_C
+// indexing. `g` is decoded and validated by ime_gemm_geometry, the helper the
+// floating-point engine also uses (ime_mx.sail); the caller has already
+// checked ime_gemm_groups_ok on it.
 //
-// `EEW_C` is the C accumulator (and storage) element width SEW. `W` is the
-// widening factor: W=1 is non-widening (vmmacc.vv); W=2/4/8 select the widening
-// variants (vwmmacc/vqmmacc/v8wmmacc), each consuming W packed narrow input
-// elements of width EEW = SEW/W per SEW-bit storage element. Only W=1 is
-// currently dispatched; the W>1 paths are exercised by later widening tasks.
+// `EEW_C` is the C accumulator (and storage) element width SEW, passed as a
+// literal alongside `g` so the element-width type parameter of
+// read/write_single_element(_in_group) is statically known. `g.W` is the
+// widening factor: W=1 is non-widening (vmmacc.vv); W=2/4/8 select the
+// widening variants (vwmmacc/vqmmacc/v8wmmacc). Each SEW-bit storage element
+// of A and B packs W elements of logical width EEW = SEW/W
+// (tbl-int-encoding-map); this function reads the whole storage element at
+// EEW_C and extracts the W logical elements with ime_packed_*. The
+// floating-point engine (ime_mx.sail) instead reads A and B directly at
+// their own logical width EEW_A, since its input formats are not packed the
+// same way.
 function execute_ime_int_gemm(
+  g : ime_gemm_geom,
   EEW_C : sew_bitsize,
-  W : nat,
-  lambda_value : nat,
-  LMUL : nat,
   signed_A : bool,
   signed_B : bool,
   vs1 : vregidx,
   vs2 : vregidx,
   vd : vregidx
 ) -> ExecutionResult = {
-  assert(lambda_value > 0);
-  assert(LMUL > 0);
-  assert(W > 0);
-  assert(EEW_C * lambda_value > 0);
-  assert(EEW_C * lambda_value * lambda_value > 0);
-  let epr_C : nat = vlen / EEW_C;
-  let K_eff : nat = lambda_value * W * LMUL;
-  assert(K_eff > 0);
   // Number of SEW-bit storage elements per matrix row along the K direction.
   // W narrow logical elements are packed into each storage element, so the
   // physical storage geometry is identical to the non-widening (W=1) case.
-  let storage_K : nat = lambda_value * LMUL;
-  assert(storage_K > 0);
-  let M : nat = vlen / (EEW_C * lambda_value);
-  let N_max : nat = M;
-  let EMUL_C : nat = vlen / (EEW_C * lambda_value * lambda_value);
-  // VL is counted in C/storage-width elements, so the active C column count
-  // follows the specification Sail helper's vl_div = lambda * LMUL rather
-  // than the widened logical K_eff = lambda * W * LMUL.
-  let N : nat = unsigned(vl) / storage_K;
-  let EMUL_C_pow = ime_group_size_to_pow(EMUL_C);
-  // Logical input element width; W such elements pack into one SEW storage slot.
+  let W : nat = g.W;
+  let storage_K : nat = g.lambda * g.LMUL;
+  // Logical input element width; W such elements pack into one SEW storage
+  // slot. ime_gemm_geometry only returns Some(g) with g.W > 0.
+  assert(W > 0);
   let EEW : nat = EEW_C / W;
-  if W != 1 & W != 2 & W != 4 & W != 8 then return Illegal_Instruction();
-  if EEW_C % W != 0 then return Illegal_Instruction();
-  if not(ime_int_eew_supported(EEW)) then return Illegal_Instruction();
-  if K_eff == 0 |
-     storage_K == 0 |
-     M == 0 |
-     unsigned(vl) % storage_K != 0 |
-     N > N_max |
-     not(ime_group_size_legal(EMUL_C)) |
-     not(valid_reg_group(vd, EMUL_C_pow)) |
-     // The C accumulator group shall not overlap either input group,
-     // regardless of VL, including VL = 0 (spec S:551-559).
-     not(ime_reg_groups_disjoint(vd, EMUL_C, vs1, LMUL)) |
-     not(ime_reg_groups_disjoint(vd, EMUL_C, vs2, LMUL))
-  then return Illegal_Instruction();
 
-  foreach (j from 0 to (N - 1)) {
-    foreach (i from 0 to (M - 1)) {
-      let c_flat = ime_mat_C_idx(i, j, N_max, EMUL_C, lambda_value, epr_C);
+  foreach (j from 0 to (g.N - 1)) {
+    foreach (i from 0 to (g.M - 1)) {
+      let c_flat = ime_mat_C_idx(i, j, g.N_max, g.EMUL_C, g.lambda, g.epr_C);
       var acc : int = signed(read_single_element_in_group(EEW_C, c_flat, vd, IME_EMUL_C_MAX));
-      foreach (k from 0 to (K_eff - 1)) {
-        let storage_col = ime_packed_storage_col(k, W);
-        let lane = ime_packed_lane(k, W);
-        let a_flat = ime_mat_A_idx(i, storage_col, storage_K, LMUL, lambda_value, epr_C);
-        let b_flat = ime_mat_B_idx(storage_col, j, storage_K, LMUL, lambda_value, epr_C);
+      foreach (k from 0 to (g.K_eff - 1)) {
+        let storage_col = ime_packed_storage_col(k, g.W);
+        let lane = ime_packed_lane(k, g.W);
+        let a_flat = ime_mat_A_idx(i, storage_col, storage_K, g.LMUL, g.lambda, g.epr_C);
+        let b_flat = ime_mat_B_idx(storage_col, j, storage_K, g.LMUL, g.lambda, g.epr_C);
         let a_storage = unsigned(read_single_element(EEW_C, a_flat, vs1));
         let b_storage = unsigned(read_single_element(EEW_C, b_flat, vs2));
         let a_val = ime_packed_subelement_value(a_storage, lane, EEW, signed_A);
@@ -296,15 +273,16 @@ function execute_ime_int_gemm(
 
 // Shared dispatch for the unscaled integer vmmacc.vv family. The members differ
 // only in the per-instruction widening factor W (vmmacc.vv W=1, vwmmacc.vv W=2,
-// and later vqmmacc.vv W=4, v8wmmacc.vv W=8); they share the vm=1-only encoding,
-// vstart/vtype legality, LMUL-aligned input register groups, and the dispatch to
-// execute_ime_int_gemm on the C accumulator SEW. `vm=0` is reserved for the
-// microscaled integer-input FP-accumulate forms, which are not implemented.
+// vqmmacc.vv W=4, v8wmmacc.vv W=8). They share the vstart and vtype legality
+// checks, the geometry and register-group checks of ime_gemm_geometry and
+// ime_gemm_groups_ok (ime_mx.sail), and the dispatch to execute_ime_int_gemm
+// on the C accumulator SEW. `vm=0` of the widening forms is the
+// integer-input MX instruction, which this function passes to
+// execute_ime_int_mx (ime_mx.sail). `vm=0` of the non-widening form (W=1) is
+// reserved and raises illegal instruction.
 private function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let LMUL_pow = get_lmul_pow();
-  let lambda_nat = ime_lambda_field_to_nat(vtype[vlambda]);
-  let LMUL = ime_lmul_value_nat(LMUL_pow);
   let signed_A = vtype[altfmt_A] == 0b0;
   let signed_B = vtype[altfmt_B] == 0b0;
 
@@ -322,18 +300,20 @@ private function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1
   if vm != 0b1 |
      not(ime_int_row_ok(W, SEW)) |
      not(valid_vtype()) |
-     illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow) |
-     lambda_nat == 0 |
-     LMUL == 0 |
-     not(valid_reg_group(vs1, LMUL_pow)) |
-     not(valid_reg_group(vs2, LMUL_pow))
+     illegal_vstart(VSTART_MANDATORY, get_num_elem(LMUL_pow, SEW), LMUL_pow)
   then return Illegal_Instruction();
 
+  let g : ime_gemm_geom = match ime_gemm_geometry(W) {
+    Some(g) => g,
+    None()  => return Illegal_Instruction(),
+  };
+  if not(ime_gemm_groups_ok(g, vs1, vs2, vd)) then return Illegal_Instruction();
+
   match SEW {
-    8  => execute_ime_int_gemm(8, W, lambda_nat, LMUL, signed_A, signed_B, vs1, vs2, vd),
-    16 => execute_ime_int_gemm(16, W, lambda_nat, LMUL, signed_A, signed_B, vs1, vs2, vd),
-    32 => execute_ime_int_gemm(32, W, lambda_nat, LMUL, signed_A, signed_B, vs1, vs2, vd),
-    64 => execute_ime_int_gemm(64, W, lambda_nat, LMUL, signed_A, signed_B, vs1, vs2, vd),
+    8  => execute_ime_int_gemm(g, 8, signed_A, signed_B, vs1, vs2, vd),
+    16 => execute_ime_int_gemm(g, 16, signed_A, signed_B, vs1, vs2, vd),
+    32 => execute_ime_int_gemm(g, 32, signed_A, signed_B, vs1, vs2, vd),
+    64 => execute_ime_int_gemm(g, 64, signed_A, signed_B, vs1, vs2, vd),
   }
 }
 

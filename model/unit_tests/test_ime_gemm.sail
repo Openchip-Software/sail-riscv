@@ -150,18 +150,24 @@ function test_ime_int_gemm_emul_c16() -> unit = {
 
   // VL=0 retires and leaves C unchanged.
   ime_test_set_e16_l1(0);
-  match execute_ime_int_gemm(16, 1, 1, 1, true, true, v8, v12, v16) {
-    Retire_Success() => (),
-    _ => assert(false, "VL=0 vmmacc did not retire"),
+  match ime_gemm_geometry(1) {
+    Some(g) => match execute_ime_int_gemm(g, 16, true, true, v8, v12, v16) {
+      Retire_Success() => (),
+      _ => assert(false, "VL=0 vmmacc did not retire"),
+    },
+    None() => assert(false, "VL=0 geometry rejected"),
   };
   foreach (n from 0 to 255) {
     assert(signed(read_single_element_in_group(16, n, v16, IME_EMUL_C_MAX)) == n)
   };
 
   ime_test_set_e16_l1(16);
-  match execute_ime_int_gemm(16, 1, 1, 1, true, true, v8, v12, v16) {
-    Retire_Success() => (),
-    _ => assert(false, "EMUL_C=16 vmmacc did not retire"),
+  match ime_gemm_geometry(1) {
+    Some(g) => match execute_ime_int_gemm(g, 16, true, true, v8, v12, v16) {
+      Retire_Success() => (),
+      _ => assert(false, "EMUL_C=16 vmmacc did not retire"),
+    },
+    None() => assert(false, "EMUL_C=16 geometry rejected"),
   };
   foreach (j from 0 to 15) {
     foreach (i from 0 to 15) {
