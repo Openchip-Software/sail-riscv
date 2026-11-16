@@ -318,8 +318,6 @@ private function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1
 }
 
 // vmmacc.vv — non-widening integer matrix multiply-accumulate.
-// This is the first concrete member of the common IME GEMM family described
-// in the specification's Sail starting point under integrated-matrix-insns.
 // `vm=0` is reserved (S:1257, S:7364) and execute_ime_int_mmacc raises
 // illegal instruction for it, but the assembly mapping still covers it so
 // disassembly of the reserved encoding does not hit an unmatched mapping
@@ -339,9 +337,9 @@ function clause execute IMEVMMACCTYPE(vm, vs2, vs1, vd) =
 
 // vwmmacc.vv — double-widening (W=2) integer matrix multiply-accumulate. A and B
 // hold SEW/2-bit logical elements, two packed per SEW-bit storage element, and C
-// accumulates at SEW. `vm=1` selects this unscaled integer form; `vm=0` is the
-// reserved vfwimmacc.vv microscaled encoding (not implemented), so it falls
-// through to the W-check / vm check in the shared dispatch and raises illegal.
+// accumulates at SEW. `vm=1` selects this unscaled integer form. `vm=0`
+// selects vfwimmacc.vv, the microscaled integer-input form, which
+// execute_ime_int_mmacc passes to execute_ime_int_mx (ime_mx.sail).
 union clause instruction = IMEVWMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVWMMACCTYPE(vm, vs2, vs1, vd)
@@ -360,10 +358,10 @@ function clause execute IMEVWMMACCTYPE(vm, vs2, vs1, vd) =
 // vqmmacc.vv — quad-widening (W=4) integer matrix multiply-accumulate. A and B
 // hold SEW/4-bit logical elements, four packed per SEW-bit storage element, and
 // C accumulates at SEW. Only SEW in {16,32,64} is valid (EEW = SEW/4 in
-// {4,8,16}); SEW=8 would give the reserved EEW=2 and is rejected by the shared
-// EEW legality check. `vm=1` selects this unscaled integer form; `vm=0` is the
-// reserved vfqmmacc.vv microscaled encoding (not implemented), so it falls
-// through to the W-check / vm check in the shared dispatch and raises illegal.
+// {4,8,16}). SEW=8 would give the reserved EEW=2, and ime_int_row_ok rejects
+// it. `vm=1` selects this unscaled integer form. `vm=0` selects vfqimmacc.vv,
+// the microscaled integer-input form, which execute_ime_int_mmacc passes to
+// execute_ime_int_mx (ime_mx.sail).
 union clause instruction = IMEVQMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEVQMMACCTYPE(vm, vs2, vs1, vd)
@@ -381,12 +379,11 @@ function clause execute IMEVQMMACCTYPE(vm, vs2, vs1, vd) =
 
 // v8wmmacc.vv — octuple-widening (W=8) integer matrix multiply-accumulate. A and
 // B hold SEW/8-bit logical elements, eight packed per SEW-bit storage element,
-// and C accumulates at SEW. Only SEW in {32,64} is valid (EEW = SEW/8 in {4,8});
-// SEW in {8,16} would give the reserved EEW in {1,2} and is rejected by the
-// shared EEW legality check. `vm=1` selects this unscaled integer form; `vm=0`
-// is the reserved vf8wimmacc.vv microscaled encoding (not implemented), so it
-// falls through to the W-check / vm check in the shared dispatch and raises
-// illegal.
+// and C accumulates at SEW. Only SEW in {32,64} is valid (EEW = SEW/8 in {4,8}).
+// SEW in {8,16} would give the reserved EEW in {1,2}, and ime_int_row_ok
+// rejects it. `vm=1` selects this unscaled integer form. `vm=0` selects
+// vf8wimmacc.vv, the microscaled integer-input form, which
+// execute_ime_int_mmacc passes to execute_ime_int_mx (ime_mx.sail).
 union clause instruction = IMEV8WMMACCTYPE : (bits(1), vregidx, vregidx, vregidx)
 
 mapping clause encdec = IMEV8WMMACCTYPE(vm, vs2, vs1, vd)
