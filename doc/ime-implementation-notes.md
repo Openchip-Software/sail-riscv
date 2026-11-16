@@ -47,7 +47,7 @@ Spec version: `riscv/integrated-matrix-extension` commit `58810918`, file `src/u
   - Inactive/tail destination elements for `vmttl.v` remain undisturbed; inactive/tail elements for `vmtts.v` do not write memory or fault.
 - Generalized integer GEMM executor (`execute_ime_int_gemm`), shared by `vmmacc.vv` (W=1), `vwmmacc.vv` (W=2), `vqmmacc.vv` (W=4), and `v8wmmacc.vv` (W=8):
   - Takes the geometry that `ime_gemm_geometry(W)` decodes for the instruction's widening factor `W`: `K_eff = lambda * W * LMUL`, `storage_K = lambda * LMUL`, `M = VLEN / (SEW * lambda)`, `N = VL / storage_K`, `N_max = M`, `EMUL_C = VLEN / (SEW * lambda^2)`.
-  - The physical storage geometry is the same for all `W`: each matrix row holds `storage_K = lambda * LMUL` `SEW`-bit storage elements along K, addressed via `mat_A_idx`/`mat_B_idx`/`mat_C_idx` (built on `tile_reg_idx`).
+  - The physical storage geometry is the same for all `W`: each matrix row holds `storage_K = lambda * LMUL` `SEW`-bit storage elements along K, addressed via `ime_mat_A_idx`/`ime_mat_B_idx`/`ime_mat_C_idx` (built on `ime_tile_reg_idx`).
   - For `W>1` each `SEW`-bit storage element packs `W` logical input elements of width `EEW = SEW / W`. Logical index `k` maps to storage column `k / W` and lane `k % W` (`ime_packed_storage_col`/`ime_packed_lane`); `ime_packed_subelement_value` extracts the lane in little-endian lane order and sign- or zero-extends it per `altfmt_A/B`. Element `k` occupies bits `[k*EEW + EEW-1 : k*EEW]`, including the sub-byte Int4 (`EEW=4`) nibble packing (even element = lower nibble, odd element = upper nibble).
   - `W` is 1, 2, 4 or 8, fixed by the instruction. `execute_ime_int_mmacc` applies these checks to a `vm=1` encoding, in this order:
     - `ime_int_row_ok(W, SEW)`: the individual extension that `tbl-int-encoding-map` names for the `(W, SEW)` cell is enabled. The `SEW=64` cells also require `Zve64x`. A `(W, SEW)` cell with no row in the table, such as `vqmmacc.vv` at `SEW=8`, fails this check.
@@ -85,8 +85,6 @@ Spec version: `riscv/integrated-matrix-extension` commit `58810918`, file `src/u
 - C tile tail elements of the multiply-accumulate instructions are always left undisturbed; the model never reads `vta` in the GEMM paths. The specification permits this: `vta=0` requires it, and `vta=1` permits (but does not require) retaining the pre-instruction value instead of writing an all-ones `SEW`-bit pattern (S:2962-2984). The model never exercises the all-ones alternative `vta=1` also allows. This is unrelated to tile load/store, where the specification itself says the `vta`/`vma` fill policies do not apply and inactive/tail destination elements are always undisturbed (S:2682, S:2804) — the model already matches that mandatory behavior.
 - The first-party test matrix targets RV64 with `VLEN=256` only; other `VLEN`/`XLEN` combinations are untested.
 - OFP8 accumulator rows are not implemented. These are `vfmmacc.vv` at `SEW=8` (`Zvvofp8mm`), `vfwmmacc.vv` at `SEW=8` with `vm=1` (`Zvvofp4ofp8mm`), and `vfwmmacc.vv` at `SEW=8` with `vm=0` (`Zvvxofp4ofp8mm`, `Zvvxnofp4ofp8mm`). The specification does not define OFP8 accumulator overflow, and E4M3 has no infinity encoding to overflow to (AMB-03). These rows decode but raise illegal instruction at execution.
-
-A fuller list of spec ambiguities and the interpretation chosen for each is tracked as the GitHub issue "IME: spec ambiguities and the interpretation chosen in ime-latest-spec" in `Openchip-Software/sail-riscv`.
 
 ## Targeted tests
 
@@ -191,13 +189,13 @@ This assumes `FIRST_PARTY_TESTS` was enabled at configure time and the RISC-V cr
 --enable-experimental-extensions --config build/config/rv64d_v256_e64.json --config-override test/first_party/src/<the test's own override JSON>
 ```
 
-## Microscaling (MX) loop
+## Microscaling (MX) matrix multiply-accumulate
 
 Implements the spec's `fp_gemm`, `fp_scaled_gemm`, `int_scaled_gemm`, and `read_block_scales` pseudocode for the MX rows and the base rows they imply.
 
 ```
 ime_mem_insts.sail  execute_ime_fp_mmacc / execute_ime_int_mmacc (dispatch)
-        |  vm=0, or a new vm=1 row
+        |  every FP row; integer vm=0 rows
         v
 ime_mx.sail         geometry, encoding-map legality, fp_gemm / scaled GEMMs
         |
@@ -220,8 +218,8 @@ ime_fp.sail         exact values (unbounded ints) + IEEE rounding with RISC-V fl
   - For `vm=0` only, `ime_mx_operands_ok` requires `SEW*lambda >= 16`, requires `W*LMUL <= SEW` with BS=16, and rejects `v0` as the base register of `vs1`, `vs2` or `vd`. Register groups are aligned, so no operand group can overlap `v0`.
   - `ime_gemm_groups_ok` accepts the register groups, as on the integer path.
 - Extension gating: a `vm=0` cell needs its `Zvvx*` (BS=32; also satisfied by `Zvvxn*`) or `Zvvxn*` (BS=16). A `vm=1` engine row needs the individual extension(s) `tbl-fp-encoding-map`/`tbl-int-encoding-map` name for that cell, or an MX extension that implies it. The FP MMA opcodes decode when `Zvvfmm`, any individual floating-point computational extension (`ime_fp_base_any_enabled`), or any FP MX extension is enabled; the integer ones when `Zvvmm`, any individual integer computational extension (`ime_int_base_any_enabled`), or any integer MX extension is enabled. The per-cell check named above still rejects the decoded instruction in execute when the enabled extension does not cover that `(W, SEW)` cell.
-- Tests (`test/first_party/src/test_ime_mx_*.S`) are generated by `ime_mx_gen.py`, an independent Python reference (exact `Fraction` arithmetic, self-checked against numpy rounding). Rerun it after changing data or cases: `python3 test/first_party/src/ime_mx_gen.py`.
-  - `vfwmmacc`, `vfqmmacc`, `vf8wmmacc`, `vfwimmacc`, `vfqimmacc`, `vf8wimmacc`: every format combination listed above, `vm=1` (where new) and both block sizes, all five rounding modes, `K_eff=64` (2 or 4 blocks), one sNaN tail column.
+- `ime_mx_gen.py` generates the nine `test/first_party/src/test_ime_mx_*.S` tests and `test_ime_fp_rows.S`. It is an independent Python reference of the specification pseudocode that computes with exact `fractions.Fraction` arithmetic. At startup, `self_check()` compares its round-to-nearest-even rounding to FP16, FP32 and FP64 with the conversions of Python's `struct` module. Rerun it after changing data or cases: `python3 test/first_party/src/ime_mx_gen.py`. CI regenerates the ten files and fails when they differ from the committed copies.
+  - `vfwmmacc`, `vfqmmacc`, `vf8wmmacc`, `vfwimmacc`, `vfqimmacc`, `vf8wimmacc`: every format combination listed above, `vm=1` for `vfwmmacc` and `vfqmmacc`, both block sizes, all five rounding modes, `K_eff=64` (2 or 4 blocks), one sNaN tail column.
   - `special`: 17 cases, including NaN scale with early termination (a later block would overflow), large and tiny scaled sums leaving the C range (one under round-up to the minimum subnormal instead of to `+0`, one under round-towards-zero to the maximum finite value instead of to infinity), `inf*0`, BF16 overflow of a scaled sum, a partial block (`K_eff=16`), NaN B scale, a `2^-127 * 2^127` scale pair that combines to exponent 0 with no flags, an integer dot product that overflows the C format, two `exact-scale` cases where rounding the group sum before scaling would tie the other way (FP32 and integer), the spec's `2^-15 * 2^-15 * 2^10 = 2^-20` FP16 example (S:2025-2029), and a `-0` group sum from a single-term (`W=1`) group whose one product is exactly `-0`.
   - `illegal`: reserved rows, BS=16 `W*LMUL>SEW`, `v0` overlap, `vstart!=0`, bad `VL`, `frm=5`, `vmmacc`/`vfmmacc` `vm=0`, SEW=8 OFP8 C.
   - `gate` (with `ime_mx_gate_override.json`): BS=32/BS=16 cells, implied base rows, an integer row and a floating-point row each enabled through their own individual extension alone (no family flag), and a mixed FP16/BF16 row that traps when only one of the two needed extensions is enabled.
@@ -229,7 +227,7 @@ ime_fp.sail         exact values (unbounded ints) + IEEE rounding with RISC-V fl
   - `test_ime_fp_rows.S` (with `ime_override.json`): the unscaled rows, random data in all rounding modes, plus a `group-tie` case per `W>1` row where rounding each product into C separately would give a different result.
 - `ime_mx_override.json` enables all IME and MX extensions except `Zvvxofp4ofp8mm` and `Zvvxnofp4ofp8mm`, whose OFP8 accumulator rows are not implemented. `ime_override.json` enables no MX extension, so the `vm=0` encodings that `test_ime_vf8wmmacc.S` expects to trap raise illegal instruction.
 
-## Next-loop checklist
+## Open work
 
 1. The OFP8 accumulator rows (`vfmmacc.vv` and `vfwmmacc.vv` at `SEW=8`) are not implemented. Implementing them needs a convention for OFP8 accumulator overflow and rounding (see "Known gaps").
 2. The only implemented disclosure profile is `G=1`, `psm=0`, `rnd=frm`. A different profile and its tests are needed only if the architecture requires one.
