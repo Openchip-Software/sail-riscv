@@ -44,7 +44,6 @@ union ime_fpx = {
 
 // RISC-V rounding modes (frm encoding).
 let IME_RM_RNE = 0
-let IME_RM_RTZ = 1
 let IME_RM_RDN = 2
 let IME_RM_RUP = 3
 let IME_RM_RMM = 4
@@ -104,12 +103,6 @@ function ime_bit_len(m : int) -> int = {
   };
   n
 }
-
-function ime_fpx_is_nan(x : ime_fpx) -> bool =
-  match x {
-    IME_FPX_NAN() => true,
-    _             => false,
-  }
 
 // Decode raw format bits (zero-extended in v) to an exact value. Returns the
 // value and whether it is a signaling NaN (IEEE formats only; OFP NaNs are

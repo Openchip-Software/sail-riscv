@@ -213,7 +213,6 @@ function clause execute VMTSTYPE(lambda_field, mode, vm, rs2, rs1, vs3) = {
   RETIRE_SUCCESS
 }
 
-
 // Shared unscaled integer GEMM executor for the vmmacc.vv family. This mirrors
 // the specification's int_gemm helper: decode geometry from vtype/vl plus the
 // per-instruction widening factor W, loop over active C columns j, rows i, and
@@ -425,18 +424,6 @@ mapping clause assembly = IMEV8WMMACCTYPE(0b0, vs2, vs1, vd)
 
 function clause execute IMEV8WMMACCTYPE(vm, vs2, vs1, vd) =
   execute_ime_int_mmacc(8, vm, vs2, vs1, vd)
-
-function ime_lane16_from32(storage : bits(32), lane : nat) -> bits(16) =
-  if lane == 0 then storage[15 .. 0] else storage[31 .. 16]
-
-function ime_lane16_from64(storage : bits(64), lane : nat) -> bits(16) =
-  if lane == 0 then storage[15 .. 0]
-  else if lane == 1 then storage[31 .. 16]
-  else if lane == 2 then storage[47 .. 32]
-  else storage[63 .. 48]
-
-function ime_lane32_from64(storage : bits(64), lane : nat) -> bits(32) =
-  if lane == 0 then storage[31 .. 0] else storage[63 .. 32]
 
 // Shared dispatch for the floating-point vfmmacc.vv family. Every row, unscaled
 // (vm=1) and microscaled (vm=0), runs on the exact engine in ime_mx.sail.
