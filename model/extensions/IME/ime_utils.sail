@@ -207,7 +207,7 @@ function ime_select_vtype_lambda(requested : bits(3), current : bits(3), sew : b
     if leq != 0b000 then leq else ime_smallest_supported_lambda_for_vsew(sew)
   }
 
-function ime_vtype_fields_clear(vt : Vtype) -> bool =
+private function ime_vtype_fields_clear(vt : Vtype) -> bool =
   vt[vlambda] == 0b000 &
   vt[vbs] == 0b0 &
   vt[altfmt_A] == 0b0 &

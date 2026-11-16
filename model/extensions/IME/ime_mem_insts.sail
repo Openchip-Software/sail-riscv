@@ -300,7 +300,7 @@ function execute_ime_int_gemm(
 // vstart/vtype legality, LMUL-aligned input register groups, and the dispatch to
 // execute_ime_int_gemm on the C accumulator SEW. `vm=0` is reserved for the
 // microscaled integer-input FP-accumulate forms, which are not implemented.
-function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult = {
+private function execute_ime_int_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult = {
   let SEW = get_sew();
   let LMUL_pow = get_lmul_pow();
   let lambda_nat = ime_lambda_field_to_nat(vtype[vlambda]);
@@ -424,7 +424,7 @@ function clause execute IMEV8WMMACCTYPE(vm, vs2, vs1, vd) =
 
 // Shared dispatch for the floating-point vfmmacc.vv family. Every row, unscaled
 // (vm=1) and microscaled (vm=0), runs on the exact engine in ime_mx.sail.
-function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult =
+private function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 : vregidx, vd : vregidx) -> ExecutionResult =
   execute_ime_fp_engine(W, vm, vs1, vs2, vd)
 
 // vfmmacc.vv — non-widening (W=1) floating-point matrix multiply-accumulate.

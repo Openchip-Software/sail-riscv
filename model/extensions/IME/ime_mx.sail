@@ -31,18 +31,18 @@
 // scales of A row 1, block 2 are in the low byte of v0 element 6.
 
 // FP group size G of the disclosed profile.
-type ime_fp_grouping : Int = 1
+private type ime_fp_grouping : Int = 1
 
 // Width of one (scale_A, scale_B) E8M0 pair in v0.
-let IME_SCALE_PAIR_BITS = 16
+private let IME_SCALE_PAIR_BITS = 16
 
 // E8M0 scale: exponent-only, bias 127, 0xFF is NaN.
-let IME_E8M0_BIAS = 127
-let IME_E8M0_NAN : bits(8) = 0xFF
+private let IME_E8M0_BIAS = 127
+private let IME_E8M0_NAN : bits(8) = 0xFF
 
 // Microscaling block sizes selected by vtype.bs.
-let IME_MX_BLOCK_BS0 = 32
-let IME_MX_BLOCK_BS1 = 16
+private let IME_MX_BLOCK_BS0 = 32
+private let IME_MX_BLOCK_BS1 = 16
 
 // Whether an FP GEMM applies v0 block scales.
 enum ime_scaling = { IME_UNSCALED, IME_MX_SCALED }
@@ -64,14 +64,14 @@ struct ime_gemm_geom = {
 }
 
 // Non-negative int to nat. Callers guarantee x >= 0.
-function ime_nat(x : int) -> nat = {
+private function ime_nat(x : int) -> nat = {
   let 'y = x;
   assert('y >= 0, "IME: negative tile index");
   y
 }
 
 // Floor division of non-negative a by positive b.
-function ime_div(a : int, b : int) -> nat = {
+private function ime_div(a : int, b : int) -> nat = {
   assert(b > 0, "IME: zero divisor");
   ime_nat(tdiv_int(a, b))
 }
@@ -119,7 +119,7 @@ function ime_gemm_geometry(W : nat) -> option(ime_gemm_geom) = {
 
 // Read input element idx of width EEW_A (4..64), zero-extended.
 // 4-bit elements pack two per byte, the even index in the low nibble.
-function ime_read_in(EEW_A : int, idx : nat, vs : vregidx) -> bits(64) =
+private function ime_read_in(EEW_A : int, idx : nat, vs : vregidx) -> bits(64) =
   match EEW_A {
     4 => {
       let byte : bits(8) = read_single_element(8, ime_div(idx, 2), vs);
@@ -133,7 +133,7 @@ function ime_read_in(EEW_A : int, idx : nat, vs : vregidx) -> bits(64) =
   }
 
 // Signed integer value of an EEW_A-bit input element (MXINT4/MXINT8).
-function ime_read_in_signed(EEW_A : int, idx : nat, vs : vregidx) -> int = {
+private function ime_read_in_signed(EEW_A : int, idx : nat, vs : vregidx) -> int = {
   let v = ime_read_in(EEW_A, idx, vs);
   if EEW_A == 4 then signed(v[3 .. 0]) else signed(v[7 .. 0])
 }
@@ -147,7 +147,7 @@ function ime_read_c(EEW_C : int, idx : nat, vd : vregidx) -> bits(64) =
     _  => internal_error(__FILE__, __LINE__, "IME: unsupported C width"),
   }
 
-function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit =
+private function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit =
   match EEW_C {
     16 => write_single_element_in_group(16, idx, vd, v[15 .. 0], IME_EMUL_C_MAX),
     32 => write_single_element_in_group(32, idx, vd, v[31 .. 0], IME_EMUL_C_MAX),
@@ -193,7 +193,7 @@ private function ime_fp_group_term(g : ime_gemm_geom, i : nat, j : nat, k : nat,
 // a single-term group (W=1) keeps that product's sign exactly, including
 // -0 (spec S:1531-1532: a W=1 sub-dot-product is the exact product; adding
 // it to +0 would turn a -0 product into +0 under round-to-nearest-even).
-function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi : nat,
+private function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi : nat,
                           fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, rm : int,
                           vs1 : vregidx, vs2 : vregidx) -> (bits_fflags, ime_fpx) = {
   let (flags0, prod0) = ime_fp_group_term(g, i, j, k_lo, fmt_A, fmt_B, vs1, vs2);
@@ -209,7 +209,7 @@ function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi 
 }
 
 // Microscaling block size from vtype.bs.
-function ime_mx_block_size() -> nat =
+private function ime_mx_block_size() -> nat =
   if vtype[vbs] == 0b1 then IME_MX_BLOCK_BS1 else IME_MX_BLOCK_BS0
 
 // fp_gemm (IME_UNSCALED) and fp_scaled_gemm (IME_MX_SCALED). The unscaled
@@ -280,7 +280,7 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
 // int_scaled_gemm (S:1283-1292, S:5355-5395): per block, the exact signed
 // integer dot product is scaled exactly by the combined E8M0 exponent,
 // rounded once to fmt_C, and added to C (rounded per frm).
-function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
+private function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
                              vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> unit = {
   let block_size = ime_mx_block_size();
   let S_blocks = ime_div(g.K_eff + block_size - 1, block_size);
@@ -327,7 +327,7 @@ function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
 
 // MX (vm=0) cell: BS=32 needs Zvvx* (or Zvvxn*, which implies it); BS=16
 // needs Zvvxn*.
-function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
+private function ime_mx_ext_ok(x : extension, xn : extension) -> bool =
   if vtype[vbs] == 0b0
   then currentlyEnabled(x) | currentlyEnabled(xn)
   else currentlyEnabled(xn)
@@ -349,7 +349,7 @@ private function ime_fp16bf16_ext_ok(fp16_ext : extension, bf16_ext : extension,
 // altfmt_A/altfmt_B for extension selection (any E4M3/E5M2 mix is legal
 // where OFP8 is an input); OFP4 additionally requires altfmt_A = altfmt_B =
 // 0 (S:1441-1442).
-function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
+private function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
   let same_inputs = vtype[altfmt_A] == vtype[altfmt_B];
   let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_in = vtype[altfmt_A] == 0b1;
@@ -391,7 +391,7 @@ function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
 }
 
 // vm=0 legality of an FP-input MX row.
-function ime_fp_mx_row_ok(W : nat, SEW : int) -> bool = {
+private function ime_fp_mx_row_ok(W : nat, SEW : int) -> bool = {
   let ofp4_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
   match (W, SEW) {
@@ -409,7 +409,7 @@ function ime_fp_mx_row_ok(W : nat, SEW : int) -> bool = {
 
 // vm=0 legality of an integer-input MX row. MXINT inputs are signed, so
 // altfmt_A and altfmt_B must be 0.
-function ime_int_mx_row_ok(W : nat, SEW : int) -> bool = {
+private function ime_int_mx_row_ok(W : nat, SEW : int) -> bool = {
   let signed_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
   signed_inputs &
@@ -454,7 +454,7 @@ function ime_int_row_ok(W : nat, SEW : int) -> bool =
 // check_microscaling_legality: SEW * lambda >= 16, and for BS=16
 // W * LMUL <= SEW. Also no operand group may overlap v0 (groups are
 // aligned, so overlap means a base register of v0).
-function ime_mx_operands_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> bool =
+private function ime_mx_operands_ok(g : ime_gemm_geom, vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> bool =
   g.EEW_C * g.lambda >= IME_SCALE_PAIR_BITS &
   not(vtype[vbs] == 0b1 & g.W * g.LMUL > g.EEW_C) &
   vs1 != zvreg & vs2 != zvreg & vd != zvreg
