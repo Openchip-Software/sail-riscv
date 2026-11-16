@@ -88,7 +88,7 @@ function ime_gemm_geometry(W : nat) -> option(ime_gemm_geom) = {
   if tmod_int(EEW_C, W) != 0 then return None();
 
   let EEW_A = ime_div(EEW_C, W);
-  if not(EEW_A == 4 | EEW_A == 8 | EEW_A == 16 | EEW_A == 32 | EEW_A == 64) then return None();
+  if not(ime_int_eew_supported(EEW_A)) then return None();
   let K_eff : nat = lambda * W * LMUL;
   let M = ime_div(vlen, EEW_C * lambda);
   let line : nat = lambda * LMUL;
@@ -99,7 +99,7 @@ function ime_gemm_geometry(W : nat) -> option(ime_gemm_geom) = {
   if tmod_int(VL, line) != 0 then return None();
   let N = ime_div(VL, line);
   if N > M then return None();
-  if not(EMUL_C == 1 | EMUL_C == 2 | EMUL_C == 4 | EMUL_C == 8 | EMUL_C == IME_EMUL_C_MAX) then return None();
+  if not(ime_group_size_legal(EMUL_C)) then return None();
 
   Some(struct {
     EEW_C = EEW_C,
