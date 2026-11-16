@@ -16,8 +16,9 @@
 #         C[0][1] = inf * NaN   -> default NaN (E4M3 NaN is quiet)
 #         C[1][1] = 1 * NaN     -> default NaN
 #         C[1][0] = 15.0 (finite)
-# Illegal: vm=0 (microscaling not implemented), SEW=16, SEW=32 with
-# altfmt_A=1 (reserved OFP4 encoding), and vstart != 0.
+# Illegal: vm=0, SEW=16, SEW=32 with altfmt_A=1, and vstart != 0. vm=0
+# traps because ime_override.json enables no MX extension. altfmt_A=1 at
+# SEW=32 is a reserved OFP4 encoding.
 #
 # All finite results are exact in the C format, so they are independent of
 # frm and accrue no flags. Data/expected values come from a scalar reference
@@ -172,7 +173,7 @@ main:
     # Illegal encodings / configurations.
     # =====================================================================
 
-    # vm=0 requests microscaling, which is not implemented.
+    # vm=0 selects the MX form, and ime_override.json enables no MX extension.
     li t0, 0x20000000000000D8
     li a1, 4
     vsetvl t2, a1, t0
