@@ -28,7 +28,7 @@ enum ime_test_op = { IME_TEST_ADD, IME_TEST_MUL }
 // Run the engine op; return (fflags, result). ime_fp_mul/ime_fp_add report
 // their flags directly and do not accrue them, so no fcsr save/restore is
 // needed here.
-function ime_test_engine(f : ime_fp_fmt, op : ime_test_op, a : bits(64), b : bits(64), rm : int) -> (bits(5), bits(64)) =
+function ime_test_engine(f : ime_fp_fmt, op : ime_test_op, a : bits(64), b : bits(64), rm : rounding_mode) -> (bits(5), bits(64)) =
   if op == IME_TEST_MUL then ime_fp_mul(f, a, b, rm) else ime_fp_add(f, a, b, rm)
 
 $[test]
@@ -41,8 +41,9 @@ function test_ime_fp_vs_softfloat() -> unit = {
     let ra = seed;
     seed = ime_test_lcg(seed);
     let rb = seed;
-    let rm = tmod_int(n, 5);
-    let rm_bits : bits(3) = to_bits_unsafe(3, rm);
+    let rm_class = tmod_int(n, 5);
+    let rm_bits : bits(3) = to_bits_unsafe(3, rm_class);
+    let rm : rounding_mode = encdec_rounding_mode(rm_bits);
     let op = if tmod_int(n, 2) == 1 then IME_TEST_MUL else IME_TEST_ADD;
     let is_mul = op == IME_TEST_MUL;
 

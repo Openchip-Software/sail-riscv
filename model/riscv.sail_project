@@ -622,7 +622,7 @@ postlude {
 
 unit_tests {
   after postlude
-  requires prelude, core, sys, exceptions, postlude, FD_core, V_core, V_instructions
+  requires prelude, core, sys, exceptions, postlude, FD_core, FD_instructions, V_core, V_instructions
 
   files
     unit_tests/test_mstatus.sail,
