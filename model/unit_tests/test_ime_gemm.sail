@@ -209,7 +209,7 @@ function test_ime_fp_gemm_emul_c16() -> unit = {
 
   ime_test_set_e16_l1(16);
   match ime_gemm_geometry(1) {
-    Some(g) => ime_fp_gemm(g, IME_FP16, IME_FP16, IME_FP16, IME_UNSCALED, 0, v8, v12, v16),
+    Some(g) => ime_fp_gemm(g, IME_FP16, IME_FP16, IME_FP16, IME_UNSCALED, RM_RNE, v8, v12, v16),
     None()  => assert(false, "EMUL_C=16 geometry rejected"),
   };
   foreach (j from 0 to 15) {

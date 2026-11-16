@@ -42,12 +42,6 @@ union ime_fpx = {
   IME_FPX_FIN : (bits(1), int, int),
 }
 
-// RISC-V rounding modes (frm encoding).
-private let IME_RM_RNE = 0
-private let IME_RM_RDN = 2
-private let IME_RM_RUP = 3
-private let IME_RM_RMM = 4
-
 // 2^n for n >= 0.
 private function ime_pow2(n : int) -> int = shl_int(1, n)
 
@@ -161,7 +155,7 @@ function ime_fpx_mul(a : ime_fpx, b : ime_fpx) -> (bits_fflags, ime_fpx) =
 // Exact sum. inf + -inf raises NV and yields NaN. An exact zero sum keeps
 // the sign of two equal-signed zeros; otherwise it is +0, or -0 under RDN
 // (IEEE 754 6.3). Example: (+3) + (-3) -> +0 (RNE), -0 (RDN).
-function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : int) -> (bits_fflags, ime_fpx) =
+function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : rounding_mode) -> (bits_fflags, ime_fpx) =
   match (a, b) {
     (IME_FPX_NAN(), _) => (zeros(), IME_FPX_NAN()),
     (_, IME_FPX_NAN()) => (zeros(), IME_FPX_NAN()),
@@ -179,14 +173,14 @@ function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : int) -> (bits_fflags, ime_fp
        if sum > 0 then IME_FPX_FIN(0b0, sum, e)
        else if sum < 0 then IME_FPX_FIN(0b1, negate(sum), e)
        else if ma == 0 & mb == 0 & sa == sb then IME_FPX_FIN(sa, 0, e)
-       else if rm == IME_RM_RDN then IME_FPX_FIN(0b1, 0, e)
+       else if rm == RM_RDN then IME_FPX_FIN(0b1, 0, e)
        else IME_FPX_FIN(0b0, 0, e))
     },
   }
 
 // Round m * 2^e (m > 0, sign s) to an integer multiple of 2^q under rm.
 // Returns (r, inexact) with the rounded value r * 2^q.
-private function ime_round_int(s : bits(1), m : int, e : int, q : int, rm : int) -> (int, bool) = {
+private function ime_round_int(s : bits(1), m : int, e : int, q : int, rm : rounding_mode) -> (int, bool) = {
   if e >= q then return (shl_int(m, e - q), false);
   let shift = q - e;
   let r0 = shr_int(m, shift);
@@ -194,11 +188,14 @@ private function ime_round_int(s : bits(1), m : int, e : int, q : int, rm : int)
   let half = shl_int(1, shift - 1);
   let r0_odd = ime_field(r0, 0, 1) == 1;
   let round_up : bool =
-    if rm == IME_RM_RNE then rem > half | (rem == half & r0_odd)
-    else if rm == IME_RM_RDN then s == 0b1 & rem > 0
-    else if rm == IME_RM_RUP then s == 0b0 & rem > 0
-    else if rm == IME_RM_RMM then rem >= half
-    else false;
+    match rm {
+      RM_RNE => rem > half | (rem == half & r0_odd),
+      RM_RDN => s == 0b1 & rem > 0,
+      RM_RUP => s == 0b0 & rem > 0,
+      RM_RMM => rem >= half,
+      RM_RTZ => false,
+      RM_DYN => false,
+    };
   (if round_up then r0 + 1 else r0, rem != 0)
 }
 
@@ -221,7 +218,7 @@ function ime_fp_canonical_nan(f : ime_fp_fmt) -> bits(64) = {
 // Returns the NX/UF/OF flags the rounding raises and the encoding
 // zero-extended to 64 bits; the caller accrues the flags (see
 // ime_fp_decode_flags).
-function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> (bits_fflags, bits(64)) = {
+function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : rounding_mode) -> (bits_fflags, bits(64)) = {
   let mbits = ime_fmt_mbits(f);
   let bias = ime_fmt_bias(f);
   let emax_field = ime_pow2(ime_fmt_ebits(f)) - 1;
@@ -256,8 +253,8 @@ function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> (bits_fflags, bi
 
       // Overflow: inf or the largest finite value, depending on rm and sign.
       if biased >= emax_field then {
-        let to_inf = rm == IME_RM_RNE | rm == IME_RM_RMM |
-                     (rm == IME_RM_RUP & s == 0b0) | (rm == IME_RM_RDN & s == 0b1);
+        let to_inf = rm == RM_RNE | rm == RM_RMM |
+                     (rm == RM_RUP & s == 0b0) | (rm == RM_RDN & s == 0b1);
         return (ofFlag() | nxFlag(),
                 if to_inf
                 then ime_fp_pack(f, s, emax_field, 0)
@@ -273,7 +270,7 @@ function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : int) -> (bits_fflags, bi
 // fp_add / fp_mul of the specification: operands and result in format f.
 // Returns the NV/NX/UF/OF flags the operation raises together with the
 // result; the caller accrues them (see ime_fp_decode_flags).
-function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> (bits_fflags, bits(64)) = {
+function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : rounding_mode) -> (bits_fflags, bits(64)) = {
   let (fa, xa) = ime_fp_decode_flags(f, a);
   let (fb, xb) = ime_fp_decode_flags(f, b);
   let (fadd, sum) = ime_fpx_add(xa, xb, rm);
@@ -281,7 +278,7 @@ function ime_fp_add(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> (bi
   (fa | fb | fadd | fround, r)
 }
 
-function ime_fp_mul(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : int) -> (bits_fflags, bits(64)) = {
+function ime_fp_mul(f : ime_fp_fmt, a : bits(64), b : bits(64), rm : rounding_mode) -> (bits_fflags, bits(64)) = {
   let (fa, xa) = ime_fp_decode_flags(f, a);
   let (fb, xb) = ime_fp_decode_flags(f, b);
   let (fmul, prod) = ime_fpx_mul(xa, xb);

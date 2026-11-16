@@ -194,7 +194,7 @@ private function ime_fp_group_term(g : ime_gemm_geom, i : nat, j : nat, k : nat,
 // -0 (spec S:1531-1532: a W=1 sub-dot-product is the exact product; adding
 // it to +0 would turn a -0 product into +0 under round-to-nearest-even).
 private function ime_fp_group_sum(g : ime_gemm_geom, i : nat, j : nat, k_lo : nat, k_hi : nat,
-                          fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, rm : int,
+                          fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, rm : rounding_mode,
                           vs1 : vregidx, vs2 : vregidx) -> (bits_fflags, ime_fpx) = {
   let (flags0, prod0) = ime_fp_group_term(g, i, j, k_lo, fmt_A, fmt_B, vs1, vs2);
   var S : ime_fpx = prod0;
@@ -216,7 +216,7 @@ private function ime_mx_block_size() -> nat =
 // form is one block spanning K_eff with no scale multiply; both walk K in
 // increasing order: block s, then LMUL=1 step, then group.
 function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, fmt_C : ime_fp_fmt,
-                     scaling : ime_scaling, rm : int,
+                     scaling : ime_scaling, rm : rounding_mode,
                      vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> unit = {
   let block_size : nat = if scaling == IME_MX_SCALED then ime_mx_block_size() else g.K_eff;
   let S_blocks = ime_div(g.K_eff + block_size - 1, block_size);
@@ -280,7 +280,7 @@ function ime_fp_gemm(g : ime_gemm_geom, fmt_A : ime_fp_fmt, fmt_B : ime_fp_fmt, 
 // int_scaled_gemm (S:1283-1292, S:5355-5395): per block, the exact signed
 // integer dot product is scaled exactly by the combined E8M0 exponent,
 // rounded once to fmt_C, and added to C (rounded per frm).
-private function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : int,
+private function ime_int_scaled_gemm(g : ime_gemm_geom, fmt_C : ime_fp_fmt, rm : rounding_mode,
                              vs1 : vregidx, vs2 : vregidx, vd : vregidx) -> unit = {
   let block_size = ime_mx_block_size();
   let S_blocks = ime_div(g.K_eff + block_size - 1, block_size);
@@ -502,7 +502,8 @@ function execute_ime_fp_engine(W : nat, vm : bits(1), vs1 : vregidx, vs2 : vregi
   let fmt_A = ime_fp_format_of(g.EEW_A, vtype[altfmt_A]);
   let fmt_B = ime_fp_format_of(g.EEW_A, vtype[altfmt_B]);
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
-  ime_fp_gemm(g, fmt_A, fmt_B, fmt_C, scaling, unsigned(rm_3b), vs1, vs2, vd);
+  let rm = encdec_rounding_mode(rm_3b);
+  ime_fp_gemm(g, fmt_A, fmt_B, fmt_C, scaling, rm, vs1, vs2, vd);
   set_vstart(zeros());
   RETIRE_SUCCESS
 }
@@ -529,7 +530,8 @@ function execute_ime_int_mx(W : nat, vs1 : vregidx, vs2 : vregidx, vd : vregidx)
   then return Illegal_Instruction();
 
   let fmt_C = ime_fp_format_of(g.EEW_C, vtype[altfmt]);
-  ime_int_scaled_gemm(g, fmt_C, unsigned(rm_3b), vs1, vs2, vd);
+  let rm = encdec_rounding_mode(rm_3b);
+  ime_int_scaled_gemm(g, fmt_C, rm, vs1, vs2, vd);
   set_vstart(zeros());
   RETIRE_SUCCESS
 }
