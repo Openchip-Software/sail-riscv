@@ -67,6 +67,24 @@ jobs:
         if: ${{ matrix.run_all_steps }}
         run: python3 -m pip install pre-commit && pre-commit run --all-files --show-diff-on-failure --color=always
 
+      - name: Ensure generated IME MX tests are up to date
+        if: ${{ matrix.run_all_steps }}
+        run: |
+          gen_dir=$(mktemp -d)
+          python3 test/first_party/src/ime_mx_gen.py "$gen_dir"
+          stale=""
+          for generated in "$gen_dir"/*; do
+            name=$(basename "$generated")
+            if ! diff -u "test/first_party/src/$name" "$generated"; then
+              stale="$stale $name"
+            fi
+          done
+          if [ -n "$stale" ]; then
+            echo "The following files do not match the output of ime_mx_gen.py:$stale"
+            echo "Run 'python3 test/first_party/src/ime_mx_gen.py test/first_party/src' and commit the result."
+            exit 1
+          fi
+
       - name: Get tests version
         run: |
           echo "SAIL_RISCV_TESTS_VERSION=$(cat test/sail_riscv_tests_version.txt)" >> $GITHUB_ENV
