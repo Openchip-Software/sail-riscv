@@ -43,13 +43,13 @@ union ime_fpx = {
 }
 
 // RISC-V rounding modes (frm encoding).
-let IME_RM_RNE = 0
-let IME_RM_RDN = 2
-let IME_RM_RUP = 3
-let IME_RM_RMM = 4
+private let IME_RM_RNE = 0
+private let IME_RM_RDN = 2
+private let IME_RM_RUP = 3
+private let IME_RM_RMM = 4
 
 // 2^n for n >= 0.
-function ime_pow2(n : int) -> int = shl_int(1, n)
+private function ime_pow2(n : int) -> int = shl_int(1, n)
 
 function ime_fmt_ebits(f : ime_fp_fmt) -> int =
   match f {
@@ -94,7 +94,7 @@ function ime_field(u : int, lo : int, n : int) -> int =
   shr_int(u, lo) - shl_int(shr_int(u, lo + n), n)
 
 // Number of significant bits of m >= 0. Example: 5 -> 3, 0 -> 0.
-function ime_bit_len(m : int) -> int = {
+private function ime_bit_len(m : int) -> int = {
   var n : int = 0;
   var v : int = m;
   while v > 0 do {
@@ -107,7 +107,7 @@ function ime_bit_len(m : int) -> int = {
 // Decode raw format bits (zero-extended in v) to an exact value. Returns the
 // value and whether it is a signaling NaN (IEEE formats only; OFP NaNs are
 // quiet). Examples: FP16 0x3c00 -> (+, 1, 0); E4M3 0x7f -> NaN.
-function ime_fp_decode(f : ime_fp_fmt, v : bits(64)) -> (ime_fpx, bool) = {
+private function ime_fp_decode(f : ime_fp_fmt, v : bits(64)) -> (ime_fpx, bool) = {
   let ebits = ime_fmt_ebits(f);
   let mbits = ime_fmt_mbits(f);
   let bias = ime_fmt_bias(f);
@@ -186,7 +186,7 @@ function ime_fpx_add(a : ime_fpx, b : ime_fpx, rm : int) -> (bits_fflags, ime_fp
 
 // Round m * 2^e (m > 0, sign s) to an integer multiple of 2^q under rm.
 // Returns (r, inexact) with the rounded value r * 2^q.
-function ime_round_int(s : bits(1), m : int, e : int, q : int, rm : int) -> (int, bool) = {
+private function ime_round_int(s : bits(1), m : int, e : int, q : int, rm : int) -> (int, bool) = {
   if e >= q then return (shl_int(m, e - q), false);
   let shift = q - e;
   let r0 = shr_int(m, shift);
