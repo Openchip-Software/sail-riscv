@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-2-Clause
-"""Generate the IME microscaling (MX) first-party tests.
+"""Generate the IME microscaling (MX) and floating-point first-party tests.
 
+The generator writes the nine test_ime_mx_*.S tests and test_ime_fp_rows.S.
 An independent Python reference of the IME specification pseudocode
 (fp_gemm, fp_scaled_gemm, int_scaled_gemm, read_block_scales) computes the
 expected C tiles and accrued fflags. Each generated test loads A, B, C and
