@@ -1,7 +1,12 @@
 // =======================================================================================
-// Integrated Matrix Extension (IME / Zvvm) tile load/store instructions.
+// This Sail RISC-V architecture model, comprising all files and
+// directories except where otherwise noted is subject the BSD
+// two-clause license in the LICENSE file.
+//
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
+
+// Integrated Matrix Extension (IME / Zvvm) tile load/store instructions.
 
 // vmtl.v — order-preserving tile load
 union clause instruction = VMTLTYPE : (bits(3), ime_tile_mode, bits(1), regidx, regidx, vregidx)

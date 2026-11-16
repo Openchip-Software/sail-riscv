@@ -1,7 +1,12 @@
 // =======================================================================================
-// Integrated Matrix Extension (IME / Zvvm) exact floating-point engine.
+// This Sail RISC-V architecture model, comprising all files and
+// directories except where otherwise noted is subject the BSD
+// two-clause license in the LICENSE file.
+//
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
+
+// Integrated Matrix Extension (IME / Zvvm) exact floating-point engine.
 
 // The specification's FP matrix pseudocode works on an abstract exact value
 // (fp_internal) and rounds it to the C accumulator format only at explicit
