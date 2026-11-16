@@ -1,8 +1,13 @@
 // =======================================================================================
-// Integrated Matrix Extension (IME / Zvvm) microscaled (MX) matrix multiply and the
-// floating-point rows that share its exact-arithmetic engine.
+// This Sail RISC-V architecture model, comprising all files and
+// directories except where otherwise noted is subject the BSD
+// two-clause license in the LICENSE file.
+//
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
+
+// Integrated Matrix Extension (IME / Zvvm) microscaled (MX) matrix multiply and the
+// floating-point rows that share its exact-arithmetic engine.
 
 // This file follows the specification pseudocode (decode_gemm_geometry,
 // fp_gemm, fp_scaled_gemm, int_scaled_gemm, read_block_scales) on top of the

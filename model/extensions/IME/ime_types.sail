@@ -1,7 +1,12 @@
 // =======================================================================================
-// Integrated Matrix Extension (IME / Zvvm) draft extension plumbing.
+// This Sail RISC-V architecture model, comprising all files and
+// directories except where otherwise noted is subject the BSD
+// two-clause license in the LICENSE file.
+//
 // SPDX-License-Identifier: BSD-2-Clause
 // =======================================================================================
+
+// Integrated Matrix Extension (IME / Zvvm) draft extension plumbing.
 
 // Largest C register group (EMUL_C) allowed by the specification. Used by
 // both the microscaled engine in ime_mx.sail and the unscaled integer
