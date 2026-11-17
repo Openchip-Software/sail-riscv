@@ -1216,7 +1216,7 @@ def illegal_cases(rng):
             "bs32",
             lam=2,
             lmul=1,
-            note="SEW=8 OFP8 C deferred",
+            note="SEW=8 OFP8 C, not implemented (AMB-03)",
             **T,
         ),
         build_case(

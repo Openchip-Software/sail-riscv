@@ -22,7 +22,7 @@ main:
     csrw mtvec, t0
 
 
-    # ---- case 1: vfwmmacc SEW=8 e2m1xe2m1->none bs32 rne [SEW=8 OFP8 C deferred] ----
+    # ---- case 1: vfwmmacc SEW=8 e2m1xe2m1->none bs32 rne [SEW=8 OFP8 C, not implemented (AMB-03)] ----
     li s10, 1
     li a1, 32
     vsetvli t1, a1, e8, m1, ta, ma
