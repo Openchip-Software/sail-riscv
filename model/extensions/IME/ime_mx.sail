@@ -138,9 +138,10 @@ private function ime_read_in_signed(EEW_A : int, idx : nat, vs : vregidx) -> int
   if EEW_A == 4 then signed(v[3 .. 0]) else signed(v[7 .. 0])
 }
 
-// Read/write a C element of width EEW_C (16, 32, 64), zero-extended to 64.
+// Read/write a C element of width EEW_C (8, 16, 32, 64), zero-extended to 64.
 function ime_read_c(EEW_C : int, idx : nat, vd : vregidx) -> bits(64) =
   match EEW_C {
+    8  => zero_extend(64, read_single_element_in_group(8, idx, vd, IME_EMUL_C_MAX)),
     16 => zero_extend(64, read_single_element_in_group(16, idx, vd, IME_EMUL_C_MAX)),
     32 => zero_extend(64, read_single_element_in_group(32, idx, vd, IME_EMUL_C_MAX)),
     64 => read_single_element_in_group(64, idx, vd, IME_EMUL_C_MAX),
@@ -149,6 +150,7 @@ function ime_read_c(EEW_C : int, idx : nat, vd : vregidx) -> bits(64) =
 
 private function ime_write_c(EEW_C : int, idx : nat, vd : vregidx, v : bits(64)) -> unit =
   match EEW_C {
+    8  => write_single_element_in_group(8, idx, vd, v[7 .. 0], IME_EMUL_C_MAX),
     16 => write_single_element_in_group(16, idx, vd, v[15 .. 0], IME_EMUL_C_MAX),
     32 => write_single_element_in_group(32, idx, vd, v[31 .. 0], IME_EMUL_C_MAX),
     64 => write_single_element_in_group(64, idx, vd, v, IME_EMUL_C_MAX),
@@ -343,18 +345,19 @@ private function ime_fp16bf16_ext_ok(fp16_ext : extension, bf16_ext : extension,
   then (if bf16_in then currentlyEnabled(bf16_ext) else currentlyEnabled(fp16_ext))
   else currentlyEnabled(fp16_ext) & currentlyEnabled(bf16_ext)
 
-// vm=1 legality per tbl-fp-encoding-map. The SEW=8 C rows of Zvvofp8mm and
-// Zvvofp4ofp8mm are not implemented and fall through to the `_ => false`
-// case (AMB-03). altfmt selects the C format. OFP4 and OFP8 inputs ignore
-// altfmt_A/altfmt_B for extension selection (any E4M3/E5M2 mix is legal
-// where OFP8 is an input); OFP4 additionally requires altfmt_A = altfmt_B =
-// 0 (S:1441-1442).
+// vm=1 legality per tbl-fp-encoding-map. altfmt selects the C format. OFP4
+// and OFP8 inputs ignore altfmt_A/altfmt_B for extension selection (any
+// E4M3/E5M2 mix is legal where OFP8 is an input); OFP4 additionally
+// requires altfmt_A = altfmt_B = 0 (S:1441-1442).
 private function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
   let same_inputs = vtype[altfmt_A] == vtype[altfmt_B];
   let default_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_in = vtype[altfmt_A] == 0b1;
   let bf16_c = vtype[altfmt] == 0b1;
   match (W, SEW) {
+    // OFP8 -> OFP8: every E4M3/E5M2 input pair into either C format
+    // (altfmt=0 E4M3, altfmt=1 E5M2), S:7282-7289.
+    (1, 8)  => currentlyEnabled(Ext_Zvvofp8mm),
     // FP16 x FP16 -> FP16 and BF16 x BF16 -> BF16 are legal; FP16 x FP16 ->
     // BF16 and BF16 x BF16 -> FP16 are reserved (the C format shall match
     // the input format when the inputs match). A mixed FP16/BF16 input
@@ -367,6 +370,8 @@ private function ime_fp_base_row_ok(W : nat, SEW : int) -> bool = {
     // enabled, and Zvvfmm's own dependency is Zve32f, not Zve64d: the
     // explicit check here is required, not redundant (AMB-15).
     (1, 64) => not(bf16_c) & currentlyEnabled(Ext_Zve64d) & currentlyEnabled(Ext_Zvvfp64mm),
+    // OFP4 -> OFP8 (E4M3 or E5M2 by altfmt), S:7305-7306.
+    (2, 8)  => default_inputs & currentlyEnabled(Ext_Zvvofp4ofp8mm),
     // OFP8 -> FP16/BF16.
     (2, 16) => if bf16_c then currentlyEnabled(Ext_Zvvofp8bf16mm) else currentlyEnabled(Ext_Zvvofp8fp16mm),
     // FP16/BF16 -> FP32; the C format is fixed at FP32 (no "BF32").
@@ -395,6 +400,8 @@ private function ime_fp_mx_row_ok(W : nat, SEW : int) -> bool = {
   let ofp4_inputs = vtype[altfmt_A] == 0b0 & vtype[altfmt_B] == 0b0;
   let bf16_c = vtype[altfmt] == 0b1;
   match (W, SEW) {
+    // MXFP4 -> OFP8 (E4M3 or E5M2 by altfmt).
+    (2, 8)  => ofp4_inputs & ime_mx_ext_ok(Ext_Zvvxofp4ofp8mm, Ext_Zvvxnofp4ofp8mm),
     (2, 16) => if bf16_c then ime_mx_ext_ok(Ext_Zvvxofp8bf16mm, Ext_Zvvxnofp8bf16mm)
                else ime_mx_ext_ok(Ext_Zvvxofp8fp16mm, Ext_Zvvxnofp8fp16mm),
     (4, 16) => ofp4_inputs &

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 """Generate the IME microscaling (MX) and floating-point first-party tests.
 
-The generator writes the nine test_ime_mx_*.S tests and test_ime_fp_rows.S.
+The generator writes the ten test_ime_mx_*.S tests and test_ime_fp_rows.S.
 An independent Python reference of the IME specification pseudocode
 (fp_gemm, fp_scaled_gemm, int_scaled_gemm, read_block_scales) computes the
 expected C tiles and accrued fflags. Each generated test loads A, B, C and
@@ -128,8 +128,11 @@ def pack(fmt, sign, biased, frac):
 
 
 def canonical_nan(fmt):
+    """Exponent all ones, fraction MSB set; E4M3 has the single NaN
+    encoding S.1111.111 and uses its positive form 0x7f."""
     _, eb, mb = FMT[fmt]
-    return pack(fmt, 0, (1 << eb) - 1, 1 << (mb - 1))
+    frac = (1 << mb) - 1 if fmt == "e4m3" else 1 << (mb - 1)
+    return pack(fmt, 0, (1 << eb) - 1, frac)
 
 
 def round_int(sign, x, rm):
@@ -162,14 +165,26 @@ def floor_log2(x):
 
 
 def rnd(fmt, x, rm, fl):
-    """Round an exact value to an IEEE format; tininess after rounding."""
+    """Round an exact value to a C format; tininess after rounding.
+
+    E5M2 overflows like an IEEE format. E4M3 has no infinity (OCP OFP8
+    non-saturating conversion, AMB-03): its largest finite value is
+    S.1111.110 (448); an overflow IEEE 754 would round to +-inf gives the
+    E4M3 NaN, one it would round to the largest finite value gives +-448,
+    both with OF|NX. An infinite x gives the E4M3 NaN with NV."""
     _, eb, mb = FMT[fmt]
     emax_field = (1 << eb) - 1
     emin = 1 - bias(fmt)
+    has_inf = fmt != "e4m3"
+    max_biased = emax_field - 1 if has_inf else emax_field
+    max_frac = (1 << mb) - 1 if has_inf else (1 << mb) - 2
     if x[0] == "nan":
         return canonical_nan(fmt)
     if x[0] == "inf":
-        return pack(fmt, x[1], emax_field, 0)
+        if has_inf:
+            return pack(fmt, x[1], emax_field, 0)
+        fl[0] |= NV
+        return canonical_nan(fmt)
     sign, mag = x[1], x[2]
     if mag == 0:
         return pack(fmt, sign, 0, 0)
@@ -184,14 +199,14 @@ def rnd(fmt, x, rm, fl):
     normal = r >= 1 << mb
     biased = q + mb + bias(fmt) if normal else 0
     frac = r - (1 << mb) if normal else r
-    if biased >= emax_field:
+    if biased > max_biased or (biased == max_biased and frac > max_frac):
         fl[0] |= OF | NX
         to_inf = (
             rm in (RNE, RMM) or (rm == RUP and sign == 0) or (rm == RDN and sign == 1)
         )
-        if to_inf:
-            return pack(fmt, sign, emax_field, 0)
-        return pack(fmt, sign, emax_field - 1, (1 << mb) - 1)
+        if not to_inf:
+            return pack(fmt, sign, max_biased, max_frac)
+        return pack(fmt, sign, emax_field, 0) if has_inf else canonical_nan(fmt)
     if inexact:
         fl[0] |= (UF | NX) if tiny else NX
     return pack(fmt, sign, biased, frac)
@@ -240,6 +255,24 @@ def self_check():
         got = rnd("fp64", ("fin", 0, x), RNE, fl)
         want = struct.unpack("<Q", struct.pack("<d", float(x)))[0]
         assert got == want, (x, hex(got), hex(want))
+    # OFP8 C formats (hand-computed; mirrors test_ime_fp_round_ofp8).
+    for fmt, x, rm, want, want_fl in (
+        ("e5m2", ("fin", 0, Fraction(2**16)), RNE, 0x7C, OF | NX),
+        ("e5m2", ("fin", 0, Fraction(2**16)), RTZ, 0x7B, OF | NX),
+        ("e5m2", ("fin", 1, Fraction(2**16)), RUP, 0xFB, OF | NX),
+        ("e4m3", ("fin", 0, Fraction(448)), RNE, 0x7E, 0),
+        ("e4m3", ("fin", 0, Fraction(464)), RNE, 0x7E, NX),
+        ("e4m3", ("fin", 0, Fraction(480)), RNE, 0x7F, OF | NX),
+        ("e4m3", ("fin", 1, Fraction(480)), RMM, 0x7F, OF | NX),
+        ("e4m3", ("fin", 0, Fraction(480)), RTZ, 0x7E, OF | NX),
+        ("e4m3", ("fin", 1, Fraction(1024)), RUP, 0xFE, OF | NX),
+        ("e4m3", ("inf", 0), RNE, 0x7F, NV),
+        ("e4m3", ("fin", 0, Fraction(1, 1024)), RNE, 0x00, UF | NX),
+        ("e4m3", ("fin", 0, Fraction(1, 1024)), RUP, 0x01, UF | NX),
+    ):
+        fl = [0]
+        got = rnd(fmt, x, rm, fl)
+        assert (got, fl[0]) == (want, want_fl), (fmt, x, rm, hex(got), fl[0])
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +513,9 @@ def vtype(sew, lmul, lam, bs16=False, alt_a=0, alt_b=0, alt=0):
 GEOM = {
     (2, 16): {"lam": 4, "lmul": 8},
     (4, 16): {"lam": 4, "lmul": 4},
+    # OFP4 -> OFP8: BS=16 allows LMUL <= SEW/W = 4, so K_eff=32 spans one
+    # BS=32 block and two BS=16 blocks.
+    (2, 8): {"lam": 4, "lmul": 4},
     (4, 32): {"lam": 2, "lmul": 8},
     (8, 32): {"lam": 2, "lmul": 4},
     (8, 64): {"lam": 1, "lmul": 8},
@@ -499,7 +535,14 @@ FP_OP = {1: "vfmmacc", 2: "vfwmmacc", 4: "vfqmmacc", 8: "vf8wmmacc"}
 INT_OP = {2: "vwmmacc", 4: "vqmmacc", 8: "v8wmmacc"}
 INT_MNEMONIC = {1: "vmmacc", 2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
 
-C_FMT = {(16, 0): "fp16", (16, 1): "bf16", (32, 0): "fp32", (64, 0): "fp64"}
+C_FMT = {
+    (8, 0): "e4m3",
+    (8, 1): "e5m2",
+    (16, 0): "fp16",
+    (16, 1): "bf16",
+    (32, 0): "fp32",
+    (64, 0): "fp64",
+}
 IN_FMT = {
     (4, 0): "e2m1",
     (8, 0): "e4m3",
@@ -521,6 +564,10 @@ def snan(fmt):
 # Per C format: (max input magnitude, Int8 range, E8M0 scale spread around
 # 2^0). Chosen so that sums round often but rarely overflow.
 RANGES = {
+    # OFP8 C (largest finite E4M3 448): inputs of magnitude <= 1 keep a
+    # K_eff=32 sum of scaled terms well inside the range.
+    "e4m3": (1, 16, 1),
+    "e5m2": (1, 16, 1),
     "fp16": (4, 16, 1),
     "bf16": (64, 128, 6),
     "fp32": (448, 128, 20),
@@ -545,11 +592,12 @@ def rand_int(rng, eew, int8_range):
 
 
 def rand_c(rng, fmt):
-    """A finite C value of moderate magnitude."""
+    """A finite C value of moderate magnitude (below 64 for OFP8)."""
+    denoms = [64, 256, 1024] if FMT[fmt][0] == 8 else [1, 16, 256]
     x = (
         "fin",
         rng.randrange(2),
-        Fraction(rng.randrange(0, 4096), rng.choice([1, 16, 256])),
+        Fraction(rng.randrange(0, 4096), rng.choice(denoms)),
     )
     return rnd(fmt, x, RNE, [0])
 
@@ -1212,11 +1260,11 @@ def illegal_cases(rng):
             rng,
             2,
             8,
-            (0, 0, 0),
+            (1, 1, 0),
             "bs32",
             lam=2,
             lmul=1,
-            note="SEW=8 OFP8 C, not implemented (AMB-03)",
+            note="SEW=8 OFP4 altfmt_A=altfmt_B=1 reserved",
             **T,
         ),
         build_case(
@@ -1318,7 +1366,9 @@ def illegal_cases(rng):
     ]
 
 
-def gate_cases(rng):
+def gate_cases(rng, rng8):
+    """rng8 draws the data of the OFP8-accumulator cases, so adding them
+    does not change the data of the cases drawn from rng."""
     T = {"trap": True}
     return [
         build_case(rng, 2, 16, (0, 0, 0), "bs32", note="Zvvxofp8fp16mm"),
@@ -1388,7 +1438,108 @@ def gate_cases(rng):
             note="mixed FP16/BF16 also needs Zvvbf16mm",
             **T,
         ),
+        # Zvvxnofp4ofp8mm implies Zvvxofp4ofp8mm, which implies the base
+        # row Zvvofp4ofp8mm. Zvvofp8mm (vfmmacc SEW=8) is not implied.
+        build_case(rng8, 2, 8, (0, 0, 0), "bs16", note="Zvvxnofp4ofp8mm"),
+        build_case(rng8, 2, 8, (0, 0, 1), "bs32", note="implied Zvvxofp4ofp8mm"),
+        build_case(rng8, 2, 8, (0, 0, 0), "vm1", note="implied Zvvofp4ofp8mm"),
+        build_case(rng8, 1, 8, (0, 0, 0), "vm1", note="needs Zvvofp8mm", **T),
     ]
+
+
+def ofp8_cases(rng):
+    """OFP8-accumulator rows (AMB-03): vfmmacc.vv SEW=8 (Zvvofp8mm) and
+    vfwmmacc.vv SEW=8 OFP4 -> OFP8 (Zvvofp4ofp8mm, Zvvx[n]ofp4ofp8mm)."""
+    T = {"trap": True}
+
+    def overflow(a, b, c):
+        """C[0][0] = c, A[0][0] * B[0][0] = a * b, and every other product
+        that involves A[0][0] or row 0 of A is +-0, so C[0][0] shows the
+        overflow result alone and no other element of C overflows."""
+
+        def mutate(g, A, B, C, v0):
+            for k in range(1, g.K):
+                put_elem(A, g.eew_a, g.a_idx(0, k), 0)
+            for j in range(1, g.M):
+                put_elem(B, g.eew_a, g.b_idx(0, j), 0)
+            put_elem(A, g.eew_a, g.a_idx(0, 0), a)
+            put_elem(B, g.eew_a, g.b_idx(0, 0), b)
+            put_elem(C, g.sew, g.c_idx(0, 0), c)
+
+        return mutate
+
+    # E5M2 57344 (largest finite) + 57344 * 1.0 overflows; the sign of the
+    # second form is negative.
+    e5_pos = overflow(0x7B, 0x3C, 0x7B)
+    e5_neg = overflow(0xFB, 0x3C, 0xFB)
+    # E4M3 448 (largest finite) + 448 * 1.0 overflows.
+    e4_pos = overflow(0x7E, 0x38, 0x7E)
+
+    def e4_inf(g, A, B, C, v0):
+        """B[0][0] is E5M2 +inf and every A[i][0] is 1.0, so each group sum
+        of column 0 is an exact +inf (no inf * 0), which E4M3 cannot
+        encode: column 0 becomes the E4M3 NaN with NV."""
+        for i in range(g.M):
+            put_elem(A, g.eew_a, g.a_idx(i, 0), 0x3C)
+        put_elem(B, g.eew_a, g.b_idx(0, 0), 0x7C)
+
+    def big_scale(g, A, B, C, v0):
+        """E8M0 2^9 as scale_A for every element of row 0, block 0,
+        combined with column 0's near-2^0 scale_B: a combined exponent far
+        outside E4M3's range. combine_scale_exponents raises no flags
+        reading or combining the scales (S:2010-2036); fp_internal_scale
+        applies the exponent exactly to the unrounded group sum, which then
+        overflows E4M3 directly at its single rounding, OF|NX."""
+        set_scale(g, v0, 0, 0, scale_a=E8M0_BIAS + 9)
+
+    cases = []
+    n = 0
+    for alt_a, alt_b in OFP8_PAIRS:
+        for alt in (0, 1):
+            cases.append(
+                build_case(rng, 1, 8, (alt_a, alt_b, alt), "vm1", RMS[n % len(RMS)])
+            )
+            n += 1
+    for alt in (0, 1):
+        for mode in ALL_MODES:
+            cases.append(build_case(rng, 2, 8, (0, 0, alt), mode, RMS[n % len(RMS)]))
+            n += 1
+    e5 = (1, 1, 1)
+    cases += [
+        build_case(rng, 1, 8, e5, "vm1", RNE, mutate=e5_pos, note="e5m2-ovf-inf"),
+        build_case(rng, 1, 8, e5, "vm1", RUP, mutate=e5_pos, note="e5m2-ovf-inf"),
+        build_case(rng, 1, 8, e5, "vm1", RDN, mutate=e5_neg, note="e5m2-ovf-inf"),
+        build_case(rng, 1, 8, e5, "vm1", RTZ, mutate=e5_pos, note="e5m2-ovf-max"),
+        build_case(
+            rng, 1, 8, (0, 0, 0), "vm1", RNE, mutate=e4_pos, note="e4m3-ovf-nan"
+        ),
+        build_case(
+            rng, 1, 8, (0, 0, 0), "vm1", RMM, mutate=e4_pos, note="e4m3-ovf-nan"
+        ),
+        build_case(
+            rng, 1, 8, (0, 0, 0), "vm1", RTZ, mutate=e4_pos, note="e4m3-ovf-max"
+        ),
+        build_case(
+            rng, 1, 8, (1, 1, 0), "vm1", RNE, mutate=e4_inf, note="e4m3-inf-nan"
+        ),
+        build_case(
+            rng, 2, 8, (0, 0, 0), "bs32", RNE, mutate=big_scale, note="e4m3-scale-nan"
+        ),
+        build_case(
+            rng, 2, 8, (0, 0, 0), "bs16", RTZ, mutate=big_scale, note="e4m3-scale-max"
+        ),
+        # Reserved rows and the BS=16 LMUL limit (W * LMUL <= SEW).
+        build_case(rng, 2, 8, (1, 1, 0), "vm1", note="OFP4 altfmt_A=1", **T),
+        build_case(rng, 2, 8, (0, 1, 1), "bs32", note="OFP4 altfmt_B=1", **T),
+        build_case(
+            rng, 2, 8, (0, 0, 0), "bs16", lmul=8, note="BS=16 W*LMUL=16>SEW", **T
+        ),
+        build_case(rng, 2, 8, (0, 0, 0), "bs32", lmul=8, note="control: BS=32, LMUL=8"),
+        build_case(
+            rng, 1, 8, (0, 0, 0), "bs32", op="vfmmacc", note="vfmmacc vm=0", **T
+        ),
+    ]
+    return cases
 
 
 def fp_one(fmt):
@@ -1599,10 +1750,32 @@ def main():
     files["test_ime_mx_gate.S"] = (
         (
             "MX extension gating with ime_mx_gate_override.json, which enables only\n"
-            "Zvvxofp8fp16mm (BS=32) and Zvvxni8fp32mm (BS=16, implies BS=32). Base\n"
-            "rows are legal only when implied by an enabled MX extension."
+            "Zvvxofp8fp16mm (BS=32), Zvvxni8fp32mm and Zvvxnofp4ofp8mm (BS=16, each\n"
+            "implies its BS=32 extension), Zvvi8mm, and Zvvfp16mm. Base rows are legal\n"
+            "only when implied by an enabled extension."
         ),
-        gate_cases(rng),
+        gate_cases(rng, random.Random(8)),
+    )
+    files["test_ime_mx_ofp8.S"] = (
+        (
+            "OFP8 accumulator rows (ime_mx_override.json): vfmmacc.vv SEW=8, every\n"
+            "E4M3/E5M2 input pair into E4M3 (altfmt=0) and E5M2 (altfmt=1) C\n"
+            "(lambda=2, LMUL=2), and vfwmmacc.vv SEW=8 OFP4 E2M1 -> E4M3/E5M2, unscaled\n"
+            "and MX with BS=32 and BS=16 (lambda=4, LMUL=4, K_eff=32). Rounding to the\n"
+            "C format follows the OCP OFP8 non-saturating conversion (AMB-03):\n"
+            "  e5m2-ovf-inf: E5M2 overflow gives +-inf with OF|NX under RNE, RUP, RDN.\n"
+            "  e5m2-ovf-max: the same overflow under RTZ gives the largest finite value.\n"
+            "  e4m3-ovf-nan: E4M3 has no infinity; an overflow that IEEE 754 rounds to\n"
+            "    +-inf gives the E4M3 NaN 0x7f with OF|NX (RNE, RMM).\n"
+            "  e4m3-ovf-max: under RTZ the overflow gives 448, the largest finite value.\n"
+            "  e4m3-inf-nan: an E5M2 inf product rounded to E4M3 gives NaN with NV.\n"
+            "  e4m3-scale-nan: a combined E8M0 exponent of 2^9, applied exactly to the\n"
+            "    unrounded group sum, overflows E4M3 at its single rounding under RNE,\n"
+            "    giving the canonical NaN, OF|NX.\n"
+            "  e4m3-scale-max: the same exactly scaled group sum under RTZ gives 448.\n"
+            "Reserved OFP4 rows, the BS=16 LMUL limit, and vfmmacc vm=0 trap."
+        ),
+        ofp8_cases(random.Random(3)),
     )
     files["test_ime_fp_rows.S"] = (
         (
