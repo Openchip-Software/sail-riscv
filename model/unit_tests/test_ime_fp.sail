@@ -71,3 +71,49 @@ function test_ime_fp_vs_softfloat() -> unit = {
 
   fcsr = saved_fcsr
 }
+
+// One ime_fp_round(fmt, x, rm) case: the encoding's low 8 bits match
+// want_bits and the raised flags match want_flags.
+private function ime_test_check_round_ofp8(fmt : ime_fp_fmt, x : ime_fpx, rm : rounding_mode,
+                                    want_bits : bits(8), want_flags : bits_fflags) -> unit = {
+  let (flags, bits) = ime_fp_round(fmt, x, rm);
+  assert(bits[7 .. 0] == want_bits, "IME OFP8 rounding: wrong encoding");
+  assert(flags == want_flags, "IME OFP8 rounding: wrong flags")
+}
+
+// ime_fp_round at the OFP8 C formats, under the OCP OFP8 non-saturating
+// conversion (AMB-03): overflow in each rounding direction, the
+// round-to-nearest-even tie at 464 (E4M3), an infinite input, and the
+// subnormal boundary.
+$[test]
+function test_ime_fp_round_ofp8() -> unit = {
+  // E5M2 overflows like an IEEE format: +-inf (OF|NX) under RNE/RUP, the
+  // largest finite value (OF|NX) under RTZ.
+  ime_test_check_round_ofp8(IME_E5M2, IME_FPX_FIN(0b0, 1, 16), RM_RNE, 0x7c, ofFlag() | nxFlag());
+  ime_test_check_round_ofp8(IME_E5M2, IME_FPX_FIN(0b0, 1, 16), RM_RTZ, 0x7b, ofFlag() | nxFlag());
+  ime_test_check_round_ofp8(IME_E5M2, IME_FPX_FIN(0b1, 1, 16), RM_RUP, 0xfb, ofFlag() | nxFlag());
+
+  // E4M3 has no infinity; its largest finite value is 448 (S.1111.110),
+  // exact and flag-free under every rounding mode.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 448, 0), RM_RNE, 0x7e, zeros());
+  // 464 is the tie between 448 and 480; round-to-nearest-even rounds down
+  // to 448, the even mantissa.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 464, 0), RM_RNE, 0x7e, nxFlag());
+  // A finite overflow that IEEE 754 would round to +-inf gives the E4M3
+  // NaN 0x7f instead, with OF and NX.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 480, 0), RM_RNE, 0x7f, ofFlag() | nxFlag());
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b1, 480, 0), RM_RMM, 0x7f, ofFlag() | nxFlag());
+  // A finite overflow that IEEE 754 would round to the largest finite
+  // value gives +-448 instead, with OF and NX.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 480, 0), RM_RTZ, 0x7e, ofFlag() | nxFlag());
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b1, 1024, 0), RM_RUP, 0xfe, ofFlag() | nxFlag());
+  // An infinite exact value gives the E4M3 NaN with NV, the same flag
+  // RISC-V raises when an infinity is converted to an integer format.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_INF(0b0), RM_RNE, 0x7f, nvFlag());
+
+  // Subnormal boundary: half of the minimum subnormal 2^-9 ties to zero
+  // under round-to-nearest-even and rounds up to the minimum subnormal
+  // under round-up.
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 1, -10), RM_RNE, 0x00, ufFlag() | nxFlag());
+  ime_test_check_round_ofp8(IME_E4M3, IME_FPX_FIN(0b0, 1, -10), RM_RUP, 0x01, ufFlag() | nxFlag())
+}
