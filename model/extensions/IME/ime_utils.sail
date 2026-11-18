@@ -36,12 +36,8 @@ function ime_fp_base_any_enabled() -> bool =
   currentlyEnabled(Ext_Zvvofp4ofp8mm)
 
 // Any floating-point-input microscaling (Zvvxofp*/Zvvxnofp*) extension.
-// Ext_Zvvxofp4ofp8mm and Ext_Zvvxnofp4ofp8mm name an OFP8 accumulator row.
-// ime_fp_mx_row_ok rejects that row because the model does not implement
-// OFP8 accumulators (AMB-03). With only these two enabled, the encoding
-// decodes and execute_ime_fp_engine raises illegal instruction. They are
-// listed here because the decode guard has to accept the encoding for
-// execute_ime_fp_engine to reach that per-cell check.
+// See ime_fp_base_any_enabled: execute_ime_fp_engine still checks the cell
+// (ime_fp_mx_row_ok in ime_mx.sail).
 function ime_fp_mx_any_enabled() -> bool =
   currentlyEnabled(Ext_Zvvxofp4fp16mm) |
   currentlyEnabled(Ext_Zvvxnofp4fp16mm) |
