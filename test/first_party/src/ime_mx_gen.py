@@ -536,7 +536,8 @@ GEOM = {
 # has no vm=0 MX form, so it is only ever built with op="vmmacc" (mode="vm1").
 FP_OP = {1: "vfmmacc", 2: "vfwmmacc", 4: "vfqmmacc", 8: "vf8wmmacc"}
 INT_OP = {2: "vwmmacc", 4: "vqmmacc", 8: "v8wmmacc"}
-INT_MNEMONIC = {1: "vmmacc", 2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
+# vm=0 of an INT_OP encoding is the MX integer-input form, named here.
+INT_MNEMONIC = {2: "vfwimmacc", 4: "vfqimmacc", 8: "vf8wimmacc"}
 
 C_FMT = {
     (8, 0): "e4m3",
@@ -712,7 +713,12 @@ def build_case(
     lmul = lmul or p["lmul"]
     M = VLEN // (sew * lam)
     g = Geom(sew, W, lam, lmul, M - 1 if N is None else N)
-    fc = C_FMT.get((sew, alt), "none")
+    # The vm=1 integer forms accumulate into an integer C, which C_FMT does
+    # not describe; make_data leaves such a C zero.
+    if int_inputs and mode == "vm1":
+        fc = f"int{sew}"
+    else:
+        fc = C_FMT.get((sew, alt), "none")
     if int_inputs:
         fa = fb = None
         A, B, C, v0 = make_data(rng, g, None, fc, int_inputs=True)
@@ -736,7 +742,7 @@ def build_case(
         ref_fp_gemm(g, fa, fb, fc, scaled, bs16, rm, A, B, Cx, v0, fl)
     if op is None:
         op = INT_OP[W] if int_inputs else FP_OP[W]
-    name = INT_MNEMONIC[W] if int_inputs else op
+    name = INT_MNEMONIC[W] if int_inputs and scaled else op
     inputs = f"int{g.eew_a}" if int_inputs else f"{fa}x{fb}"
     title = f"{name} SEW={sew} {inputs}->{fc} {mode} {RM_NAMES.get(rm, rm)}"
     if note:
