@@ -18,10 +18,16 @@
 //   ime_fpx = NaN | +-inf | (-1)^sign * mant * 2^exp      (exact)
 //        |  ime_fpx_mul / ime_fpx_add (exact, NV flags only)
 //        v
-//   ime_fp_round (FP16/BF16/FP32/FP64, frm, RISC-V flags) -> C bits
+//   ime_fp_round (E4M3/E5M2/FP16/BF16/FP32/FP64, frm, RISC-V flags) -> C bits
+//
+// E2M1 is an input format only. Rounding to E2M1 or asking for an E2M1 NaN
+// is an internal error.
 //
 // Results are IEEE 754 correctly rounded. Underflow uses tininess after
 // rounding, as RISC-V does. Every materialized NaN is the canonical NaN.
+// The OFP8 C formats follow the OCP OFP8 non-saturating conversion: E5M2
+// overflows to +-inf like an IEEE format; E4M3 has no infinity, so a result
+// IEEE 754 would round to +-inf is the E4M3 NaN instead (AMB-03).
 
 // FP formats that IME matrix instructions read or write.
 enum ime_fp_fmt = {
@@ -70,6 +76,28 @@ function ime_fmt_mbits(f : ime_fp_fmt) -> int =
 function ime_fmt_bias(f : ime_fp_fmt) -> int =
   ime_pow2(ime_fmt_ebits(f) - 1) - 1
 
+// Special values that a format encodes.
+enum ime_fp_specials = {
+  // +-inf at exponent all ones and fraction zero; NaN at the other
+  // exponent-all-ones encodings.
+  IME_SPECIALS_IEEE,
+  // No infinity; one NaN at S.1...1.1...1 (OCP E4M3).
+  IME_SPECIALS_NAN_ONLY,
+  // No infinity and no NaN; every encoding is finite (OCP E2M1).
+  IME_SPECIALS_NONE,
+}
+
+function ime_fmt_specials(f : ime_fp_fmt) -> ime_fp_specials =
+  match f {
+    IME_E2M1 => IME_SPECIALS_NONE,
+    IME_E4M3 => IME_SPECIALS_NAN_ONLY,
+    IME_E5M2 => IME_SPECIALS_IEEE,
+    IME_FP16 => IME_SPECIALS_IEEE,
+    IME_BF16 => IME_SPECIALS_IEEE,
+    IME_FP32 => IME_SPECIALS_IEEE,
+    IME_FP64 => IME_SPECIALS_IEEE,
+  }
+
 // Format of an FP element of width EEW; `alt` is altfmt/altfmt_A/altfmt_B.
 // Example: (8, 0b1) -> E5M2, (16, 0b1) -> BF16.
 function ime_fp_format_of(EEW : int, alt : bits(1)) -> ime_fp_fmt =
@@ -111,16 +139,16 @@ private function ime_fp_decode(f : ime_fp_fmt, v : bits(64)) -> (ime_fpx, bool) 
   let sign : bits(1) = if ime_field(u, mbits + ebits, 1) == 1 then 0b1 else 0b0;
   let e_all_ones = ime_pow2(ebits) - 1;
   let m_all_ones = ime_pow2(mbits) - 1;
-  let ieee_specials = f != IME_E2M1 & f != IME_E4M3;
+  let specials = ime_fmt_specials(f);
 
   // Specials: IEEE-style encodings, and the single E4M3 NaN (S.1111.111).
-  if ieee_specials & e == e_all_ones & m == 0 then return (IME_FPX_INF(sign), false);
-  if ieee_specials & e == e_all_ones then {
+  if specials == IME_SPECIALS_IEEE & e == e_all_ones & m == 0 then return (IME_FPX_INF(sign), false);
+  if specials == IME_SPECIALS_IEEE & e == e_all_ones then {
     let quiet = ime_field(m, mbits - 1, 1) == 1;
     let signaling = not(quiet) & f != IME_E5M2;
     return (IME_FPX_NAN(), signaling)
   };
-  if f == IME_E4M3 & e == e_all_ones & m == m_all_ones then return (IME_FPX_NAN(), false);
+  if specials == IME_SPECIALS_NAN_ONLY & e == e_all_ones & m == m_all_ones then return (IME_FPX_NAN(), false);
 
   // Subnormal: m * 2^(1 - bias - mbits). Normal: (2^mbits + m) * 2^(e - bias - mbits).
   if e == 0
@@ -207,26 +235,55 @@ function ime_fp_pack(f : ime_fp_fmt, s : bits(1), biased : int, frac : int) -> b
   to_bits_unsafe(64, sign_val + shl_int(biased, mbits) + frac)
 }
 
-// Canonical NaN: sign 0, exponent all ones, fraction MSB set.
-// Examples: FP16 0x7e00, BF16 0x7fc0, FP32 0x7fc00000.
+// Canonical NaN: sign 0, exponent all ones, fraction MSB set. E4M3 has a
+// single NaN encoding, S.1111.111, and uses its positive form.
+// E2M1 has no NaN encoding.
+// Examples: FP16 0x7e00, BF16 0x7fc0, FP32 0x7fc00000, E5M2 0x7e, E4M3 0x7f.
 function ime_fp_canonical_nan(f : ime_fp_fmt) -> bits(64) = {
   let mbits = ime_fmt_mbits(f);
-  ime_fp_pack(f, 0b0, ime_pow2(ime_fmt_ebits(f)) - 1, shl_int(1, mbits - 1))
+  let frac : int = match ime_fmt_specials(f) {
+    IME_SPECIALS_IEEE     => shl_int(1, mbits - 1),
+    IME_SPECIALS_NAN_ONLY => ime_pow2(mbits) - 1,
+    IME_SPECIALS_NONE     => internal_error(__FILE__, __LINE__, "IME: E2M1 has no NaN encoding"),
+  };
+  ime_fp_pack(f, 0b0, ime_pow2(ime_fmt_ebits(f)) - 1, frac)
 }
 
-// Round an exact value to IEEE format f (FP16/BF16/FP32/FP64) under rm.
-// Returns the NX/UF/OF flags the rounding raises and the encoding
+// Round an exact value to C format f (E4M3/E5M2/FP16/BF16/FP32/FP64) under
+// rm. Returns the NV/NX/UF/OF flags the rounding raises and the encoding
 // zero-extended to 64 bits; the caller accrues the flags (see
 // ime_fp_decode_flags).
+//
+// E4M3 (AMB-03): the largest finite value is S.1111.110 (448). A finite
+// overflow that IEEE 754 rounds to +-inf under rm gives the E4M3 NaN with
+// OF and NX; one that IEEE 754 rounds to the largest finite value gives
+// +-448 with OF and NX. An infinite x gives the E4M3 NaN with NV, the same
+// flag RISC-V raises when an infinity is converted to an integer format.
+// Examples (E4M3): 464 RNE -> 448 (NX, tie to even); 480 RNE -> NaN
+// (OF|NX); 480 RTZ -> 448 (OF|NX).
+//
+// E2M1 is not a C format. Its overflow rules are not defined here.
 function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : rounding_mode) -> (bits_fflags, bits(64)) = {
   let mbits = ime_fmt_mbits(f);
   let bias = ime_fmt_bias(f);
   let emax_field = ime_pow2(ime_fmt_ebits(f)) - 1;
   let emin = 1 - bias;
+  let has_inf : bool = match ime_fmt_specials(f) {
+    IME_SPECIALS_IEEE     => true,
+    IME_SPECIALS_NAN_ONLY => false,
+    IME_SPECIALS_NONE     => internal_error(__FILE__, __LINE__, "IME: E2M1 is not a C format"),
+  };
+  // Largest finite encoding: (emax_field - 1, all-ones fraction) for IEEE
+  // formats, (emax_field, all-ones fraction minus one) for E4M3.
+  let max_biased = if has_inf then emax_field - 1 else emax_field;
+  let max_frac = if has_inf then ime_pow2(mbits) - 1 else ime_pow2(mbits) - 2;
 
   match x {
     IME_FPX_NAN() => (zeros(), ime_fp_canonical_nan(f)),
-    IME_FPX_INF(s) => (zeros(), ime_fp_pack(f, s, emax_field, 0)),
+    IME_FPX_INF(s) => {
+      if has_inf then (zeros(), ime_fp_pack(f, s, emax_field, 0))
+      else (nvFlag(), ime_fp_canonical_nan(f))
+    },
     IME_FPX_FIN(s, m, e) => {
       if m == 0 then return (zeros(), ime_fp_pack(f, s, 0, 0));
 
@@ -251,14 +308,15 @@ function ime_fp_round(f : ime_fp_fmt, x : ime_fpx, rm : rounding_mode) -> (bits_
       let biased = if normal then q + mbits + bias else 0;
       let frac = if normal then r - ime_pow2(mbits) else r;
 
-      // Overflow: inf or the largest finite value, depending on rm and sign.
-      if biased >= emax_field then {
+      // Overflow: inf (E4M3: NaN) or the largest finite value, depending on
+      // rm and sign.
+      if biased > max_biased | (biased == max_biased & frac > max_frac) then {
         let to_inf = rm == RM_RNE | rm == RM_RMM |
                      (rm == RM_RUP & s == 0b0) | (rm == RM_RDN & s == 0b1);
         return (ofFlag() | nxFlag(),
-                if to_inf
-                then ime_fp_pack(f, s, emax_field, 0)
-                else ime_fp_pack(f, s, emax_field - 1, ime_pow2(mbits) - 1))
+                if to_inf then (if has_inf then ime_fp_pack(f, s, emax_field, 0)
+                                else ime_fp_canonical_nan(f))
+                else ime_fp_pack(f, s, max_biased, max_frac))
       };
 
       (if inexact then (if tiny then ufFlag() | nxFlag() else nxFlag()) else zeros(),
