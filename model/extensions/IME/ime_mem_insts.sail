@@ -405,8 +405,9 @@ private function execute_ime_fp_mmacc(W : nat, vm : bits(1), vs2 : vregidx, vs1 
   execute_ime_fp_engine(W, vm, vs1, vs2, vd)
 
 // vfmmacc.vv — non-widening (W=1) floating-point matrix multiply-accumulate.
-// A, B, and C are all SEW-bit IEEE floating-point values. `vm=1` selects the
-// unscaled form; `vm=0` is reserved (S:1346) and execute_ime_fp_mmacc raises
+// A, B, and C are all SEW-bit floating-point values: OFP8 E4M3/E5M2 at
+// SEW=8, FP16/BF16 at SEW=16, FP32 or FP64. `vm=1` selects the unscaled
+// form; `vm=0` is reserved (S:1346) and execute_ime_fp_mmacc raises
 // illegal instruction for it. The assembly mapping still covers it so
 // disassembly of the reserved encoding does not hit an unmatched mapping
 // clause; it prints with the same `, v0.scale` suffix as the other vm=0 MX

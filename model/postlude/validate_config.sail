@@ -1159,8 +1159,7 @@ private function check_ime_extension_dependencies() -> bool = {
   };
   // The 31 individual computational extensions (tbl-extensions S:808-843)
   // and the 2 OFP4->OFP8 microscaling extensions (tbl-mx-extensions
-  // S:7150-7187). The model does not implement the OFP8 accumulator rows of
-  // those two extensions. Executing such a row raises illegal instruction.
+  // S:7150-7187).
   if (config extensions.Zvvi4i8mm.supported : bool) & not(hartSupports(Ext_Zve32x)) then {
     valid = false;
     print_endline("The Zvvi4i8mm extension is enabled but Zve32x is disabled: supporting Zvvi4i8mm requires Zve32x.");
