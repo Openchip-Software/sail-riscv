@@ -63,8 +63,11 @@ runs:
       if: runner.os == 'Linux' && job.container != null
       shell: bash
       # This is a Rocky container.
+      # TEMPORARY: --nobest works around Rocky mirrors whose Devel repository
+      # still has libstdc++-static 8.5.0-30 while AppStream has gcc 8.5.0-31.
+      # Remove --nobest once the mirrors are in sync (2026-11-26).
       run: |
-        dnf install -y --enablerepo=devel libstdc++-static make gcc gcc-c++ pkg-config gmp-static ninja-build sudo
+        dnf install -y --nobest --enablerepo=devel libstdc++-static make gcc gcc-c++ pkg-config gmp-static ninja-build sudo
 
     - name: Install latest Clang (Linux runner)
       if: runner.os == 'Linux' && inputs.install-clang == 'true' && job.container == null

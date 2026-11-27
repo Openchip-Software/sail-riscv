@@ -63,6 +63,9 @@
     "Zvvxnofp4fp32mm": {
       "supported": true
     },
+    "Zvvxnofp4ofp8mm": {
+      "supported": true
+    },
     "Zvvxnofp8bf16mm": {
       "supported": true
     },
@@ -82,6 +85,9 @@
       "supported": true
     },
     "Zvvxofp4fp32mm": {
+      "supported": true
+    },
+    "Zvvxofp4ofp8mm": {
       "supported": true
     },
     "Zvvxofp8bf16mm": {
